@@ -1,7 +1,7 @@
 # Data pipeline
 
 Separate from the site build. Run manually (or on a schedule via a separate
-GitHub Action, not yet added) to regenerate `public/data/counties.json`,
+GitHub Action, not yet added) to regenerate `public/data/counties.*.json`,
 which is committed to the repo so the site build itself has no runtime
 dependency on NOAA's servers.
 
@@ -19,14 +19,14 @@ pipeline — see `src/data/loadCountyData.ts`.
 
 ## Codebook (climdiv fixed-width files)
 
-| Field | Columns | Notes |
-|---|---|---|
-| STATE-CODE | 1–2 | 01–48 |
-| DIVISION-NUMBER | 3–5 | |
-| COUNTY-FIPS | included in ID | 001–999 |
-| ELEMENT-CODE | — | 02 = avg temp, 27 = max temp, 28 = min temp |
-| YEAR | — | |
-| 12 monthly values | — | fixed-width, missing = -99.90 |
+| Field             | Columns        | Notes                                       |
+| ----------------- | -------------- | ------------------------------------------- |
+| STATE-CODE        | 1–2            | 01–48                                       |
+| DIVISION-NUMBER   | 3–5            |                                             |
+| COUNTY-FIPS       | included in ID | 001–999                                     |
+| ELEMENT-CODE      | —              | 02 = avg temp, 27 = max temp, 28 = min temp |
+| YEAR              | —              |                                             |
+| 12 monthly values | —              | fixed-width, missing = -99.90               |
 
 ## Usage
 

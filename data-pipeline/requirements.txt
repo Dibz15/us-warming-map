@@ -3,3 +3,4 @@ pandas>=2.2
 numpy>=1.26
 scipy
 topojson
+loguru

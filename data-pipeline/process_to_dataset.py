@@ -17,8 +17,6 @@ This implementation splits the output into two files:
 - counties.series.json: columnar time series data
 """
 
-import os
-import re
 import sys
 import pandas as pd
 import numpy as np
@@ -32,16 +30,24 @@ from loguru import logger
 # Example line: 01001271895  53.70  48.70  67.60...
 
 # Configure loguru logger with appropriate formatting for data pipeline output
+# Use paths relative to this script's location
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_LOG_DIR = _SCRIPT_DIR / "logs"
+_LOG_DIR.mkdir(exist_ok=True)
+
 logger.remove()  # Remove default handler
 logger.add(
-    "data-pipeline/logs/pipeline.log",
+    _LOG_DIR / "pipeline.log",
     rotation="10 MB",
     retention="30 days",
     level="DEBUG",
-    format="[{{time:YYYY-MM-DD HH:mm:ss}}] [{{level}}] {{function}} (line {{line}}): {{message}}"
+    format="[%(time:YYYY-MM-DD HH:mm:ss) s] [%(levelname-7s)] %(name)s:%(function)s:%(line)d - %(message)s"
 )
-logger.add(sys.stderr, level="INFO",
-           format="[{{time:HH:mm:ss}}] [{{level}}] {{message}}")
+logger.add(
+    sys.stderr,
+    level="INFO",
+    format="<lightcyan>[%(time:HH:mm:ss)s]</> <level>%(levelname)-8s</> <green>%(message)s</green>"
+)
 
 # Column specifications based on actual NOAA climdiv fixed-width format
 # Example line: 01001271895  53.70  48.70  67.60...
@@ -120,7 +126,7 @@ def read_raw_files():
     all_dfs = []
 
     for file_path in files:
-        print(f"Processing {file_path.name}")
+        logger.info(f"Processing {file_path.name}")
 
         # Read fixed-width file with clean column specifications to avoid duplication issues
         colspecs = [COLUMN_SPECS[col] for col in COLUMN_SPECS.keys()]
@@ -247,8 +253,8 @@ def _load_county_lookup() -> dict[str, dict[str, str]]:
             with open(lookup_path, "r") as f:
                 _county_lookup = json.load(f)
         except FileNotFoundError:
-            print(f"Warning: County lookup file not found at {lookup_path}")
-            print("Run create_county_lookup.py first to generate it.")
+            logger.warning(f"County lookup file not found at {lookup_path}")
+            logger.warning("Run create_county_lookup.py first to generate it.")
     return _county_lookup
 
 
@@ -418,15 +424,15 @@ def noaa_state_name(noaa_state_code: str | int) -> str:
 
 def main():
     """Main function to process NOAA county climate data."""
-    print("Starting data processing...")
+    logger.info("Starting data processing...")
 
     # Read all raw files
     df = read_raw_files()
-    print(f"Read {len(df)} records")
+    logger.info(f"Read {len(df)} records")
 
     # Aggregate to annual means by element type
     annual_df = aggregate_to_annual_means(df)
-    print(f"Aggregated to {len(annual_df)} county-year records")
+    logger.info(f"Aggregated to {len(annual_df)} county-year records")
 
     # Remove any rows with missing data for all three elements
     annual_df = annual_df.dropna(subset=['tmean', 'tmax', 'tmin'], how='all')
@@ -533,9 +539,10 @@ def main():
         "counties": meta_data
     }
 
-    # Write output files
-    output_dir = Path("../public/data")
-    output_dir.mkdir(exist_ok=True)
+    # Write output files (relative to repo root)
+    _REPO_ROOT = _SCRIPT_DIR.parent
+    output_dir = _REPO_ROOT / "public" / "data"
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     # Convert numpy types to Python native types for JSON serialization
     def convert_numpy_types(obj):
@@ -556,14 +563,18 @@ def main():
         meta_data_with_domains)
     series_data_serializable = convert_numpy_types(series_data)
 
-    with open(output_dir / "counties.meta.json", "w") as f:
+    meta_path = output_dir / "counties.meta.json"
+    series_path = output_dir / "counties.series.json"
+
+    with open(meta_path, "w") as f:
         json.dump(meta_data_with_domains_serializable, f, indent=2)
+    logger.info(f"Wrote {meta_path} ({len(meta_data)} counties)")
 
-    with open(output_dir / "counties.series.json", "w") as f:
+    with open(series_path, "w") as f:
         json.dump(series_data_serializable, f, indent=2)
+    logger.info(f"Wrote {series_path}")
 
-    print(f"Output written to {output_dir}")
-    print("Processing complete!")
+    logger.info("Processing complete!")
 
 
 if __name__ == "__main__":
