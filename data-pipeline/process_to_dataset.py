@@ -19,12 +19,29 @@ This implementation splits the output into two files:
 
 import os
 import re
+import sys
 import pandas as pd
 import numpy as np
 from pathlib import Path
 from datetime import datetime
 import json
 from scipy import stats
+from loguru import logger
+
+# Column specifications based on actual NOAA climdiv fixed-width format
+# Example line: 01001271895  53.70  48.70  67.60...
+
+# Configure loguru logger with appropriate formatting for data pipeline output
+logger.remove()  # Remove default handler
+logger.add(
+    "data-pipeline/logs/pipeline.log",
+    rotation="10 MB",
+    retention="30 days",
+    level="DEBUG",
+    format="[{{time:YYYY-MM-DD HH:mm:ss}}] [{{level}}] {{function}} (line {{line}}): {{message}}"
+)
+logger.add(sys.stderr, level="INFO",
+           format="[{{time:HH:mm:ss}}] [{{level}}] {{message}}")
 
 # Column specifications based on actual NOAA climdiv fixed-width format
 # Example line: 01001271895  53.70  48.70  67.60...
@@ -60,6 +77,31 @@ ELEMENT_CODES = {
     27: 'tmax',     # Maximum temperature
     28: 'tmin'      # Minimum temperature
 }
+
+# State FIPS codes that were never assigned/used in the current standard.
+# These should be excluded from county data output.
+# - 03: Reserved for American Samoa but never used (dropped in 1987 revision)
+# - 07: Reserved for Panama Canal Zone (defunct)
+# - 14: Reserved for Guam (never used in this standard)
+# - 43: Reserved for Puerto Rico (never used in this standard)
+# - 52: Reserved for Virgin Islands (never used in this standard)
+INVALID_STATE_FIPS = {"03", "07", "14", "43", "52"}
+
+
+def _is_valid_county(noaa_id: str) -> bool:
+    """Check if county FIPS has a valid (used) state prefix.
+
+    Args:
+        fips: 5-digit FIPS code (state + county).
+
+    Returns:
+        True if the state prefix is not in the set of reserved/unused codes.
+    """
+    # NOAA has its own legacy code system that differs from FIPS
+    # We need to convert from NOAA to FIPS before anything else
+    noaa_state = noaa_id[:2]
+    fips_state = noaa_state_to_fips(noaa_state)
+    return fips_state not in INVALID_STATE_FIPS
 
 
 def read_raw_files():
@@ -172,18 +214,22 @@ def compute_slopes_per_county(df):
     # Group by FIPS code and compute slope for each element
     slopes = {}
 
-    for fips in df['CNTYCODE'].unique():
-        county_data = df[df['CNTYCODE'] == fips]
+    for noaa_id in df['CNTYCODE'].unique():
+        # Skip counties with invalid (reserved/unused) state FIPS codes
+        if not _is_valid_county(noaa_id):
+            continue
 
-        if fips not in slopes:
-            slopes[fips] = {}
+        county_data = df[df['CNTYCODE'] == noaa_id]
+
+        if noaa_id not in slopes:
+            slopes[noaa_id] = {}
 
         # Compute slopes for each temperature type
         for elem_name in ['tmean', 'tmax', 'tmin']:
             if elem_name in county_data.columns and not county_data[elem_name].isna().all():
                 elem_data = county_data[['YEAR', elem_name]].dropna()
                 slope = compute_ols_slopes(elem_data, value_col=elem_name)
-                slopes[fips][f'tslopeFPerDecade_{elem_name}'] = slope
+                slopes[noaa_id][f'tslopeFPerDecade_{elem_name}'] = slope
 
     return slopes
 
@@ -227,7 +273,6 @@ def get_county_info_from_fips(fips: str) -> tuple[str, str]:
         state_code = fips[:2]
         county_code = fips[2:]
         # Build a reasonable fallback name using standard state abbreviations
-        from pathlib import Path as _Path
 
         STATE_MAP = {
             "01": "AL", "02": "AK", "04": "AZ", "05": "AR", "06": "CA",
@@ -246,6 +291,129 @@ def get_county_info_from_fips(fips: str) -> tuple[str, str]:
         return (f"County_{county_code}", state)
 
     return (f"Unknown_{fips}", "XX")
+
+
+"""
+Crosswalk between NOAA's climdiv STATE-CODE (positions 1-2 of every climdiv
+county/divisional record) and real Census/FIPS state codes.
+
+WHY THIS EXISTS
+----------------
+nClimDiv county and divisional files do NOT use FIPS state codes. They use a
+legacy NOAA numbering scheme: the 48 contiguous states, numbered 01-48 in
+straight alphabetical order, with Alaska and Hawaii excluded from the
+sequence entirely (both were added to nClimDiv later - Alaska divisions in
+2015, Hawaii divisions in 2025 - and are not slotted into the alphabetical
+1-48 list). This is confirmed directly against NOAA/PSL's own climate
+division reference (https://psl.noaa.gov/data/correlation/climdivisions.html),
+which lists divisions in exactly this order with exactly 48 states and no
+DC/AK/HI.
+
+Naively treating STATE-CODE as a FIPS code silently produces wrong joins
+(e.g. NOAA code 02 = Arizona, not FIPS 02 = Alaska; NOAA code 03 = Arkansas,
+not FIPS 03 = unassigned).
+
+WHAT THIS DOES NOT COVER
+--------------------------
+Alaska and Hawaii county-level coverage in nClimDiv. Because AK/HI aren't
+part of the alphabetical 1-48 scheme, any STATE-CODE value outside 1-48
+found in the raw county files needs to be investigated by hand before
+assuming what it maps to - don't guess. `noaa_state_to_fips` raises on
+anything outside 1-48 for exactly this reason, rather than returning a
+best-effort answer.
+"""
+
+# NOAA climdiv state-order (01-50) -> (state name, FIPS state code).
+# 1-48 verified against NOAA/PSL's divisional names reference (alphabetical,
+# CONUS only). 49-50 taken directly from the official STATE CODE TABLE in
+# https://www.ncei.noaa.gov/pub/data/cirs/climdiv/county-readme.txt, which
+# assigns them out of alphabetical order: 49 = Hawaii, 50 = Alaska.
+_NOAA_ORDER_TO_STATE: dict[int, tuple[str, str]] = {
+    1: ("Alabama", "01"),
+    2: ("Arizona", "04"),
+    3: ("Arkansas", "05"),
+    4: ("California", "06"),
+    5: ("Colorado", "08"),
+    6: ("Connecticut", "09"),
+    7: ("Delaware", "10"),
+    8: ("Florida", "12"),
+    9: ("Georgia", "13"),
+    10: ("Idaho", "16"),
+    11: ("Illinois", "17"),
+    12: ("Indiana", "18"),
+    13: ("Iowa", "19"),
+    14: ("Kansas", "20"),
+    15: ("Kentucky", "21"),
+    16: ("Louisiana", "22"),
+    17: ("Maine", "23"),
+    18: ("Maryland", "24"),
+    19: ("Massachusetts", "25"),
+    20: ("Michigan", "26"),
+    21: ("Minnesota", "27"),
+    22: ("Mississippi", "28"),
+    23: ("Missouri", "29"),
+    24: ("Montana", "30"),
+    25: ("Nebraska", "31"),
+    26: ("Nevada", "32"),
+    27: ("New Hampshire", "33"),
+    28: ("New Jersey", "34"),
+    29: ("New Mexico", "35"),
+    30: ("New York", "36"),
+    31: ("North Carolina", "37"),
+    32: ("North Dakota", "38"),
+    33: ("Ohio", "39"),
+    34: ("Oklahoma", "40"),
+    35: ("Oregon", "41"),
+    36: ("Pennsylvania", "42"),
+    37: ("Rhode Island", "44"),
+    38: ("South Carolina", "45"),
+    39: ("South Dakota", "46"),
+    40: ("Tennessee", "47"),
+    41: ("Texas", "48"),
+    42: ("Utah", "49"),
+    43: ("Vermont", "50"),
+    44: ("Virginia", "51"),
+    45: ("Washington", "53"),
+    46: ("West Virginia", "54"),
+    47: ("Wisconsin", "55"),
+    48: ("Wyoming", "56"),
+    49: ("Hawaii", "15"),
+    50: ("Alaska", "02"),
+}
+
+
+def noaa_state_to_fips(noaa_state_code: str | int) -> str:
+    """
+    Convert a NOAA climdiv STATE-CODE (as it appears in raw file records,
+    e.g. "02" or 2) to a real 2-digit FIPS state code (e.g. "04" for
+    Arizona).
+
+    Raises ValueError for anything outside 1-48, rather than guessing -
+    that range is where Alaska/Hawaii or a genuine parsing error would show
+    up, and both deserve a human looking at the raw record, not a silent
+    fallback.
+    """
+    code = int(noaa_state_code)
+    if code not in _NOAA_ORDER_TO_STATE:
+        raise ValueError(
+            f"NOAA state-order code {code!r} is outside the known 1-50 "
+            "alphabetical range. This is Washington DC (not part of "
+            "the alphabetical scheme) or a parsing error - do not guess a "
+            "mapping, inspect the raw record."
+        )
+    _, fips = _NOAA_ORDER_TO_STATE[code]
+    return fips
+
+
+def noaa_state_name(noaa_state_code: str | int) -> str:
+    """Convenience lookup for the state name, same rules as noaa_state_to_fips."""
+    code = int(noaa_state_code)
+    if code not in _NOAA_ORDER_TO_STATE:
+        raise ValueError(
+            f"NOAA state-order code {code!r} is outside the known 1-48 range."
+        )
+    name, _ = _NOAA_ORDER_TO_STATE[code]
+    return name
 
 
 def main():
@@ -278,7 +446,19 @@ def main():
     max_year = annual_df['YEAR'].max()
 
     # Process each county to build metadata and series
-    for fips in annual_df['CNTYCODE'].unique():
+    for noaa_id in annual_df['CNTYCODE'].unique():
+
+        # NOAA has its own legacy code system that differs from FIPS
+        # We need to convert from NOAA to FIPS before anything else
+        noaa_state, noaa_county = noaa_id[:2], noaa_id[2:]
+        fips_state = noaa_state_to_fips(noaa_state)
+
+        fips = fips_state + noaa_id
+
+        # Skip counties with invalid (reserved/unused) state FIPS codes
+        if not _is_valid_county(fips):
+            continue
+
         county_data = annual_df[annual_df['CNTYCODE'] == fips]
 
         # Get county name and state (placeholder implementation)
