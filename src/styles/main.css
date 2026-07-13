@@ -24,4 +24,121 @@ body {
 
 #app {
   height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Map container - fills remaining space below header */
+#map-container {
+  flex: 1;
+  position: relative;
+  overflow: hidden;
+  min-height: 0; /* Allow flex item to shrink below content size */
+}
+
+/* Choropleth SVG */
+#choropleth-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+/* County paths */
+.county-path {
+  transition:
+    stroke 0.1s,
+    stroke-width 0.1s;
+}
+
+.county-path:hover {
+  stroke: #333 !important;
+  stroke-width: 1.5px !important;
+}
+
+.county-path:focus {
+  stroke: #333;
+  stroke-width: 1.5px;
+  outline: 2px dashed #0066cc;
+}
+
+/* Popup chart overlay */
+.popup-chart {
+  will-change: left, top;
+}
+
+.popup-close {
+  width: 24px;
+  height: 24px;
+  line-height: 20px;
+  text-align: center;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.popup-close:hover {
+  background: #f0f0f0;
+}
+
+/* Color scale legend */
+.legend-container {
+  position: absolute;
+  bottom: 16px;
+  right: 16px;
+  background: rgba(255, 255, 255, 0.92);
+  border-radius: 6px;
+  padding: 10px 12px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.12);
+  font-size: 11px;
+  z-index: 500;
+}
+
+.legend-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: var(--color-text);
+}
+
+.legend-gradient {
+  width: 180px;
+  height: 12px;
+  border-radius: 3px;
+  margin-bottom: 4px;
+}
+
+.legend-labels {
+  display: flex;
+  justify-content: space-between;
+  color: var(--color-text);
+  opacity: 0.8;
+}
+
+/* Loading indicator */
+.loading-indicator {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  font-size: 14px;
+  color: var(--color-text);
+  opacity: 0.6;
+}
+
+/* Footer / attribution */
+#footer {
+  padding: 6px 12px;
+  background: rgba(240, 240, 240, 0.95);
+  border-top: 1px solid #e0e0e0;
+  font-size: 11px;
+  color: #666;
+  text-align: center;
+  flex-shrink: 0;
+}
+
+#footer a {
+  color: #0066cc;
+  text-decoration: none;
+}
+
+#footer a:hover {
+  text-decoration: underline;
 }

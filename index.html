@@ -6,13 +6,20 @@
     <title>County Warming Trends</title>
     <meta
       name="description"
-      content="Annual max/min temperature trends by US county, 1895–present."
+      content="Annual max/min temperature trends by US county, 1895-present."
     />
     <link rel="stylesheet" href="/src/styles/main.css" />
   </head>
   <body>
     <div id="app">
-      <!-- TODO: header, map svg host, and popup chart container go here -->
+      <div id="map-container">
+        <div class="loading-indicator">Loading climate data...</div>
+      </div>
+      <div id="footer">
+        Data source:
+        <a href="https://www.ncei.noaa.gov/" target="_blank" rel="noopener">NOAA NCEI</a>
+        · Precomputed temperature regression by county
+      </div>
     </div>
     <script type="module" src="/src/main.ts"></script>
   </body>

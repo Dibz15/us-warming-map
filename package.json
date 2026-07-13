@@ -7,17 +7,23 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc --noEmit && vite build",
-    "preview": "vite preview",
+    "preview": "vite preview --port=5173 --host",
     "lint": "eslint src",
     "format": "prettier --write \"src/**/*.{ts,css,html}\""
   },
-  "keywords": ["climate", "d3", "choropleth", "noaa"],
+  "keywords": [
+    "climate",
+    "d3",
+    "choropleth",
+    "noaa"
+  ],
   "author": "",
   "license": "MIT",
   "devDependencies": {
     "@types/d3-array": "^3.2.2",
     "@types/d3-format": "^3.0.4",
     "@types/d3-geo": "^3.1.0",
+    "@types/d3-interpolate": "^3.0.4",
     "@types/d3-scale": "^4.0.9",
     "@types/d3-selection": "^3.0.11",
     "@types/d3-shape": "^3.1.8",
@@ -33,6 +39,7 @@
   },
   "dependencies": {
     "d3-array": "^3.2.4",
+    "d3-axis": "^3.0.0",
     "d3-format": "^3.1.2",
     "d3-geo": "^3.1.1",
     "d3-scale": "^4.0.2",
