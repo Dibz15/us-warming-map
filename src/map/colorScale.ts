@@ -1,4 +1,11 @@
-// Diverging blue/white/red scale mapping warming slope (°F/decade) to color.
+// Diverging blue/white/red scale mapping warming slope (°F (or °C)/decade) to color.
+// Domain should be centered on 0 with a symmetric extent (e.g. via a max
+// absolute slope across all counties) so "no trend" is always white.
+
+export function slopeColorScale(_domainExtent: number): (slope: number) => string {
+  throw new Error("not implemented");
+}
+
 // Domain should be centered on 0 with a symmetric extent (e.g. via a max
 // absolute slope across all counties) so "no trend" is always white.
 //

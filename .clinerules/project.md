@@ -1,7 +1,7 @@
 # Project context
 
 A static site: an interactive US map where each county is colored by the
-slope (°F/decade) of its annual mean temperature trend, and hovering/tapping
+slope (°F (or °C)/decade) of its annual mean temperature trend, and hovering/tapping
 a county pops up a small chart showing annual max/min temperature bounds
 plus a mean trend line, 1895–present.
 

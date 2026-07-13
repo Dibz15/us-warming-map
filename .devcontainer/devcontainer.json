@@ -20,7 +20,8 @@
         "saoudrizwan.claude-dev",
         "dbaeumer.vscode-eslint",
         "esbenp.prettier-vscode",
-        "ms-python.python"
+        "ms-python.python",
+        "saoudrizwan.claude-dev@4.0.8"
       ],
       "settings": {
         "editor.formatOnSave": true,
@@ -28,5 +29,12 @@
       }
     }
   },
-  "remoteUser": "node"
+  "remoteUser": "node",
+  "mounts": [
+    {
+      "source": "cline-globalstorage",
+      "target": "/home/vscode/.vscode-server/data/User/globalStorage/saoudrizwan.claude-dev",
+      "type": "volume"
+    }
+  ]
 }

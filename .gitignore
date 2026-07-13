@@ -3,6 +3,7 @@ node_modules/
 
 # build output
 dist/
+public/
 
 # data pipeline working files (regenerate via data-pipeline/, don't commit raw NOAA downloads)
 data-pipeline/raw/
