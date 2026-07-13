@@ -1,0 +1,18 @@
+# dependencies
+node_modules/
+
+# build output
+dist/
+
+# data pipeline working files (regenerate via data-pipeline/, don't commit raw NOAA downloads)
+data-pipeline/raw/
+data-pipeline/__pycache__/
+data-pipeline/*.pyc
+
+# env / editor / OS
+.env
+.env.local
+.DS_Store
+*.log
+.vscode/*
+!.vscode/extensions.json
