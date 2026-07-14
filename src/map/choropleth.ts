@@ -64,6 +64,10 @@ export function renderChoropleth(options: ChoroplethOptions): void {
     countyDataMap.set(county.fips, county);
   }
 
+  // State FIPS prefixes to exclude from rendering (Alaska, Hawaii).
+  // These states have significant data gaps that distort the color scale.
+  const EXCLUDED_STATE_PREFIXES = new Set(["02", "15"]);
+
   // Convert TopoJSON to GeoJSON features
   const geoFeatures: CountyFeature[] = [];
 
@@ -76,7 +80,12 @@ export function renderChoropleth(options: ChoroplethOptions): void {
         const raw = feature(geometry as any, obj as any) as unknown as {
           features: CountyFeature[];
         };
-        geoFeatures.push(...raw.features);
+        for (const feat of raw.features) {
+          const fips = String(feat.id ?? "").padStart(5, "0");
+          // Skip excluded states (Alaska, Hawaii)
+          if (EXCLUDED_STATE_PREFIXES.has(fips.slice(0, 2))) continue;
+          geoFeatures.push(feat);
+        }
       }
     }
   } else if ("features" in geometry) {
@@ -85,6 +94,9 @@ export function renderChoropleth(options: ChoroplethOptions): void {
       features: Array<{ geometry: unknown; id?: string | number }>;
     };
     for (const f of geoObj.features) {
+      const fips = String(f.id ?? "").padStart(5, "0");
+      // Skip excluded states (Alaska, Hawaii)
+      if (EXCLUDED_STATE_PREFIXES.has(fips.slice(0, 2))) continue;
       geoFeatures.push({
         geometry: f.geometry,
         id: f.id ?? 0,

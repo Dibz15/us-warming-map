@@ -25,5 +25,6 @@ export interface CountyTrend {
 export interface CountyDataset {
   generatedAt: string; // ISO date the pipeline was last run
   sourceYearRange: [number, number];
+  slopeDomains: Record<string, [number, number]>; // Percentile-based domains per temperature type
   counties: CountyTrend[];
 }

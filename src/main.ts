@@ -24,8 +24,10 @@ async function main(): Promise<void> {
     throw new Error("Failed to load TopoJSON geometry — aborting map render.");
   }
 
-  // Build the color scale (use a domain of ±0.05 °F/decade; values outside are clamped).
-  const colorScale = slopeColorScale(0.05);
+  // Build the color scale using the precalculated tmean domain from the dataset.
+  // The domain is [min, max] percentiles; we take the larger absolute value for symmetry.
+  const tmeanDomain: [number, number] = dataset.slopeDomains?.tmean ?? [-0.05, 0.05];
+  const colorScale = slopeColorScale(tmeanDomain);
 
   // Track the currently selected county so we can clear the popup.
   let selectedCounty: NonNullable<CountyDataset["counties"]>[number] | null = null;
