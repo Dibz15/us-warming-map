@@ -18,6 +18,7 @@ This implementation splits the output into two files:
 """
 
 import sys
+from typing import Union
 import pandas as pd
 import numpy as np
 from pathlib import Path
@@ -41,12 +42,12 @@ logger.add(
     rotation="10 MB",
     retention="30 days",
     level="DEBUG",
-    format="[%(time:YYYY-MM-DD HH:mm:ss) s] [%(levelname-7s)] %(name)s:%(function)s:%(line)d - %(message)s"
+    format="[{time:YYYY-MM-DD HH:mm:ss}] [{level: <7}] {name}:{function}:{line} - {message}"
 )
 logger.add(
-    sys.stderr,
+    sys.stdout,
     level="INFO",
-    format="<lightcyan>[%(time:HH:mm:ss)s]</> <level>%(levelname)-8s</> <green>%(message)s</green>"
+    format="[{time:HH:mm:ss}] <level>{level: <8}</level> {message}"
 )
 
 # Column specifications based on actual NOAA climdiv fixed-width format
@@ -63,18 +64,18 @@ COLUMN_SPECS = {
     'ELEMENT': (5, 7),
     'YEAR': (7, 11),       # Year 4 digits (pos 7-10)
     # Monthly temperature values - each is a 5-char field with 2-space gap between fields
-    'JAN': (13, 18),   # pos 13-17 + trailing space at 18
-    'FEB': (20, 25),   # pos 20-24 + trailing space at 25
-    'MAR': (27, 32),   # each field is 5 chars (+ 2 space gap) = 7 char stride
-    'APR': (34, 39),
-    'MAY': (41, 46),
-    'JUNE': (48, 53),
-    'JULY': (55, 60),
-    'AUG': (62, 67),
-    'SEPT': (69, 74),
-    'OCT': (76, 81),
-    'NOV': (83, 88),
-    'DEC': (90, 95)
+    'JAN': (12, 18),   # pos 12-17 + trailing space at 18
+    'FEB': (19, 25),   # pos 19-24 + trailing space at 25
+    'MAR': (26, 32),   # each field is 5 chars (+ 2 space gap) = 7 char stride
+    'APR': (33, 39),
+    'MAY': (40, 46),
+    'JUNE': (47, 53),
+    'JULY': (54, 60),
+    'AUG': (61, 67),
+    'SEPT': (68, 74),
+    'OCT': (75, 81),
+    'NOV': (82, 88),
+    'DEC': (89, 95)
 }
 
 # Element codes (as integers to match the parsed dtype)
@@ -98,15 +99,18 @@ def _is_valid_county(noaa_id: str) -> bool:
     """Check if county FIPS has a valid (used) state prefix.
 
     Args:
-        fips: 5-digit FIPS code (state + county).
+        noaa_id: 5-digit NOAA ID string (state + county, may have leading zeros).
 
     Returns:
         True if the state prefix is not in the set of reserved/unused codes.
     """
+    # Ensure we're working with a padded 5-char string to preserve leading zeros
+    padded_id = str(noaa_id).zfill(5)
+
     # NOAA has its own legacy code system that differs from FIPS
     # We need to convert from NOAA to FIPS before anything else
-    noaa_state = noaa_id[:2]
-    fips_state = noaa_state_to_fips(noaa_state)
+    noaa_state_code = int(padded_id[:2])
+    fips_state = noaa_state_to_fips(noaa_state_code)
     return fips_state not in INVALID_STATE_FIPS
 
 
@@ -144,7 +148,7 @@ def read_raw_files():
         # Replace -99.99 with NaN for temperature data
         temp_cols = ['JAN', 'FEB', 'MAR', 'APR', 'MAY',
                      'JUNE', 'JULY', 'AUG', 'SEPT', 'OCT', 'NOV', 'DEC']
-        df[temp_cols] = df[temp_cols].replace(-99.99, np.nan)
+        df[temp_cols] = df[temp_cols].replace(-99.9, np.nan)
 
         # Add file source for debugging
         df['source_file'] = file_path.name
@@ -221,21 +225,31 @@ def compute_slopes_per_county(df):
     slopes = {}
 
     for noaa_id in df['CNTYCODE'].unique():
+        # Ensure we're working with a padded 5-char string to preserve leading zeros
+        padded_id = str(noaa_id).zfill(5)
+        noaa_state_code = int(padded_id[:2])
+
         # Skip counties with invalid (reserved/unused) state FIPS codes
-        if not _is_valid_county(noaa_id):
+        if noaa_state_code > 50:
+            logger.warning(
+                f'Encountered NOAA state-order code over 50: {noaa_state_code}')
             continue
 
-        county_data = df[df['CNTYCODE'] == noaa_id]
+        if not _is_valid_county(padded_id):
+            continue
 
-        if noaa_id not in slopes:
-            slopes[noaa_id] = {}
+        # Use the padded ID for consistent matching
+        county_data = df[df['CNTYCODE'] == padded_id]
+
+        if padded_id not in slopes:
+            slopes[padded_id] = {}
 
         # Compute slopes for each temperature type
         for elem_name in ['tmean', 'tmax', 'tmin']:
             if elem_name in county_data.columns and not county_data[elem_name].isna().all():
                 elem_data = county_data[['YEAR', elem_name]].dropna()
                 slope = compute_ols_slopes(elem_data, value_col=elem_name)
-                slopes[noaa_id][f'tslopeFPerDecade_{elem_name}'] = slope
+                slopes[padded_id][f'tslopeFPerDecade_{elem_name}'] = slope
 
     return slopes
 
@@ -388,7 +402,7 @@ _NOAA_ORDER_TO_STATE: dict[int, tuple[str, str]] = {
 }
 
 
-def noaa_state_to_fips(noaa_state_code: str | int) -> str:
+def noaa_state_to_fips(noaa_state_code: Union[str, int]) -> str:
     """
     Convert a NOAA climdiv STATE-CODE (as it appears in raw file records,
     e.g. "02" or 2) to a real 2-digit FIPS state code (e.g. "04" for
@@ -411,7 +425,7 @@ def noaa_state_to_fips(noaa_state_code: str | int) -> str:
     return fips
 
 
-def noaa_state_name(noaa_state_code: str | int) -> str:
+def noaa_state_name(noaa_state_code: Union[str, int]) -> str:
     """Convenience lookup for the state name, same rules as noaa_state_to_fips."""
     code = int(noaa_state_code)
     if code not in _NOAA_ORDER_TO_STATE:
@@ -427,15 +441,31 @@ def main():
     logger.info("Starting data processing...")
 
     # Read all raw files
-    df = read_raw_files()
-    logger.info(f"Read {len(df)} records")
+    raw_dir = Path(__file__).parent / "raw"
+    annual_df_path = raw_dir / "annual_df.csv"
 
-    # Aggregate to annual means by element type
-    annual_df = aggregate_to_annual_means(df)
-    logger.info(f"Aggregated to {len(annual_df)} county-year records")
+    if not annual_df_path.exists():
+        logger.debug('Reading climdiv files')
+        df = read_raw_files()
+        logger.info(f"Read {len(df)} records")
 
-    # Remove any rows with missing data for all three elements
-    annual_df = annual_df.dropna(subset=['tmean', 'tmax', 'tmin'], how='all')
+        # Aggregate to annual means by element type
+        logger.debug('Aggregating climdiv data')
+        annual_df = aggregate_to_annual_means(df)
+        logger.info(f"Aggregated to {len(annual_df)} county-year records")
+
+        # Remove any rows with missing data for all three elements
+        annual_df = annual_df.dropna(
+            subset=['tmean', 'tmax', 'tmin'], how='all')
+
+        annual_df.to_csv(annual_df_path, index=False)
+    else:
+        logger.info('Output annual_df already exists. Loading.')
+        # FIX: Ensure CNTYCODE is read as string to preserve leading zeros.
+        # Without this, pandas infers int64 for numeric-looking IDs like "01001",
+        # which becomes integer 1001. Slicing str(1001)[:2] gives "10" instead of "01",
+        # causing incorrect NOAA state code mapping and downstream data mismatches.
+        annual_df = pd.read_csv(annual_df_path, dtype={'CNTYCODE': str})
 
     # Compute slopes for each county and element type
     slopes = compute_slopes_per_county(annual_df)
@@ -453,19 +483,32 @@ def main():
 
     # Process each county to build metadata and series
     for noaa_id in annual_df['CNTYCODE'].unique():
+        # Ensure we're working with a padded 5-char string to preserve leading zeros.
+        # This is critical because NOAA uses its own ID system different from FIPS,
+        # and leading zeros must be preserved throughout the conversion process.
+        padded_id = str(noaa_id).zfill(5)
 
         # NOAA has its own legacy code system that differs from FIPS
         # We need to convert from NOAA to FIPS before anything else
-        noaa_state, noaa_county = noaa_id[:2], noaa_id[2:]
-        fips_state = noaa_state_to_fips(noaa_state)
+        noaa_state_code = int(padded_id[:2])
+        noaa_county_code = padded_id[2:]
 
-        fips = fips_state + noaa_id
-
-        # Skip counties with invalid (reserved/unused) state FIPS codes
-        if not _is_valid_county(fips):
+        if noaa_state_code > 50:
+            logger.warning(
+                f'Encountered NOAA state-order code over 50: {noaa_state_code}')
             continue
 
-        county_data = annual_df[annual_df['CNTYCODE'] == fips]
+        fips_state = noaa_state_to_fips(noaa_state_code)
+
+        # Build the full FIPS code by combining the converted FIPS state code
+        # with the original county code from the NOAA ID
+        fips = fips_state + noaa_county_code
+
+        # Skip counties with invalid (reserved/unused) state FIPS codes
+        if not _is_valid_county(padded_id):
+            continue
+
+        county_data = annual_df[annual_df['CNTYCODE'] == padded_id]
 
         # Get county name and state (placeholder implementation)
         name, state = get_county_info_from_fips(fips)
