@@ -47,7 +47,7 @@ async function main(): Promise<void> {
   // Render the choropleth.
   renderChoropleth({
     container: mapContainer,
-    geometry: geojson as Record<string, unknown>,
+    geometry: geojson,
     dataset,
     colorScale,
     onCountySelect(county) {

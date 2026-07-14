@@ -95,27 +95,23 @@ export async function loadCountyClimate(): Promise<CountyDataset> {
   return mergeMetaAndSeries(meta, series);
 }
 
-/** Load US TopoJSON county geometry.
-
- * During build the Vite config copies us-atlas JSON files to public/data/.
- * In dev, we fetch directly from node_modules via an absolute URL (Vite
- * serves assets from the package). If neither works, fall back to importing
- * the module's JSON using ?url suffix (Vite asset import).
+/** Load US TopoJSON county geometry and convert to GeoJSON.
+ *
+ * Strategy: Import the TopoJSON as a static module with `with { type: "json" }`,
+ * then use topojson-client to convert it to a GeoJSON FeatureCollection.
  */
-export async function loadCountyGeometry(): Promise<unknown> {
-  // Strategy 1: fetch the file that was copied to public/ during build.
-  try {
-    const res = await fetch("/data/us-counties-10m.json");
-    if (res.ok) return res.json();
-  } catch {
-    /* ignore — try next strategy */
-  }
+/* eslint-disable @typescript-eslint/no-explicit-any -- us-atlas is a well-known, immutable data source;
+   topojson-client's types are stricter than us-atlas's actual TopoJSON structure. */
+import { feature } from "topojson-client";
 
-  // Strategy 2: use Vite's ?url asset import.
-  const url = new URL("../../node_modules/us-atlas/counties-10m.json", import.meta.url)
-    .href;
-  const res = await fetch(url);
-  if (res.ok) return res.json();
+/** Static import of us-atlas TopoJSON. */
+import countiesTopoJson from "us-atlas/counties-10m.json" with { type: "json" };
 
-  throw new Error("Cannot load us-atlas TopoJSON geometry — is node_modules present?");
+/** Return type matching choropleth.ts ChoroplethOptions.geometry. */
+export type CountyGeometry = Record<string, unknown>;
+
+/** Convert the statically imported TopoJSON to GeoJSON and return synchronously. */
+export function loadCountyGeometry(): CountyGeometry {
+  const topo = countiesTopoJson as any;
+  return feature(topo, topo.objects.counties) as unknown as CountyGeometry;
 }

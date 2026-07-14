@@ -139,7 +139,7 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
   const allTemps = [...tmaxValues, ...tminValues].filter((v) => !isNaN(v));
   const yMin = Math.min(...allTemps);
   const yMax = Math.max(...allTemps);
-  const yPad = (yMax - yMin) * 0.05 || 1;
+  const yPad = (yMax - yMin) * 0.15 || 1;
 
   const yScale = scaleLinear()
     .domain([yMin - yPad, yMax + yPad])
