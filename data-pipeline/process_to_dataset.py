@@ -17,6 +17,7 @@ This implementation splits the output into two files:
 - counties.series.json: columnar time series data
 """
 
+import argparse
 import sys
 from typing import Union
 import pandas as pd
@@ -161,7 +162,14 @@ def read_raw_files():
 
 
 def aggregate_to_annual_means(df):
-    """Aggregate monthly data to annual means by element type."""
+    """Aggregate monthly data to annual means by element type.
+
+    Only computes annual aggregates for years with all 12 months of data.
+    Partial-year values are set to NaN to prevent misleading statistics.
+
+    Returns a long-form DataFrame with one row per county-year-element combo
+    (tmean, tmax, tmin), and separate columns for CNTYCODE and YEAR.
+    """
     temp_cols = ['JAN', 'FEB', 'MAR', 'APR', 'MAY',
                  'JUNE', 'JULY', 'AUG', 'SEPT', 'OCT', 'NOV', 'DEC']
 
@@ -171,12 +179,18 @@ def aggregate_to_annual_means(df):
     for elem_code, elem_name in ELEMENT_CODES.items():
         elem_df = df[df['ELEMENT'] == elem_code].copy()
 
+        # Check which rows have all 12 months of data (no NaN values)
+        complete_mask = elem_df[temp_cols].notna().all(axis=1)
+
         if elem_code == 2:  # Average temperature - take mean of months
             elem_df['VALUE'] = elem_df[temp_cols].mean(axis=1)
         elif elem_code == 27:  # Maximum temperature - take max of months
             elem_df['VALUE'] = elem_df[temp_cols].max(axis=1)
         elif elem_code == 28:  # Minimum temperature - take min of months
             elem_df['VALUE'] = elem_df[temp_cols].min(axis=1)
+
+        # Set VALUE to NaN for rows with incomplete data
+        elem_df.loc[~complete_mask, 'VALUE'] = np.nan
 
         # Keep only necessary columns
         elem_df = elem_df[['CNTYCODE', 'YEAR', 'VALUE']]
@@ -196,6 +210,92 @@ def aggregate_to_annual_means(df):
     ).reset_index()
 
     return pivot_df
+
+
+def aggregate_to_short_form_dfs(df):
+    """Aggregate monthly data to three short-form DataFrames (one per element type).
+
+    Each DataFrame has:
+      - Index: CNTYCODE (5-digit string)
+      - Columns: YEAR (integers, e.g. 1895, 1896, ...)
+      - Values: Temperature in Fahrenheit
+
+    Only computes annual aggregates for years with all 12 months of data.
+    Partial-year values are set to NaN to prevent misleading statistics.
+
+    Steps:
+      1. Compute annual values per element type (tmean, tmax, tmin).
+      2. Drop county-year rows where ALL three elements are NaN.
+      3. Pivot each element into its own short-form DataFrame.
+
+    Returns:
+        dict: {'tmean': df, 'tmax': df, 'tmin': df}
+    """
+    temp_cols = ['JAN', 'FEB', 'MAR', 'APR', 'MAY',
+                 'JUNE', 'JULY', 'AUG', 'SEPT', 'OCT', 'NOV', 'DEC']
+
+    # Compute annual values for each element type and collect in long-form
+    rows: list[dict] = []
+    for elem_code, elem_name in ELEMENT_CODES.items():
+        elem_df = df[df['ELEMENT'] == elem_code].copy()
+
+        # Check which rows have all 12 months of data (no NaN values)
+        complete_mask = elem_df[temp_cols].notna().all(axis=1)
+
+        if elem_code == 2:  # Average temperature - take mean of months
+            elem_df['VALUE'] = elem_df[temp_cols].mean(axis=1)
+        elif elem_code == 27:  # Maximum temperature - take max of months
+            elem_df['VALUE'] = elem_df[temp_cols].max(axis=1)
+        elif elem_code == 28:  # Minimum temperature - take min of months
+            elem_df['VALUE'] = elem_df[temp_cols].min(axis=1)
+
+        # Set VALUE to NaN for rows with incomplete data
+        elem_df.loc[~complete_mask, 'VALUE'] = np.nan
+
+        # Select only needed columns and rename VALUE to element name
+        selected = elem_df[['CNTYCODE', 'YEAR', 'VALUE']].copy()
+        selected[elem_name] = selected['VALUE']
+        rows.append(selected[['CNTYCODE', 'YEAR', elem_name]])
+
+    # Combine all element types into one long-form DataFrame
+    long_df = pd.concat(rows, ignore_index=True)
+
+    # Pivot to wide form (one row per county, columns=year, one sub-table per elem)
+    # Start with tmean
+    wide_tmean = long_df.pivot_table(
+        index='CNTYCODE',
+        columns='YEAR',
+        values='tmean',
+        aggfunc='first'
+    )
+    wide_tmax = long_df.pivot_table(
+        index='CNTYCODE',
+        columns='YEAR',
+        values='tmax',
+        aggfunc='first'
+    )
+    wide_tmin = long_df.pivot_table(
+        index='CNTYCODE',
+        columns='YEAR',
+        values='tmin',
+        aggfunc='first'
+    )
+
+    # Drop county-year rows where ALL three elements are NaN from each DF
+    # (We drop entire rows where the county has no data for that element)
+    wide_tmean = wide_tmean.dropna(how='all')
+    wide_tmax = wide_tmax.dropna(how='all')
+    wide_tmin = wide_tmin.dropna(how='all')
+
+    # Ensure column types are integers
+    for df_elem in [wide_tmean, wide_tmax, wide_tmin]:
+        df_elem.columns = df_elem.columns.astype(int)
+
+    return {
+        'tmean': wide_tmean.sort_index(),
+        'tmax': wide_tmax.sort_index(),
+        'tmin': wide_tmin.sort_index()
+    }
 
 
 def compute_ols_slopes(df, value_col='VALUE'):
@@ -219,12 +319,28 @@ def compute_ols_slopes(df, value_col='VALUE'):
         return float('nan')
 
 
-def compute_slopes_per_county(df):
-    """Compute slopes for each county and element type."""
-    # Group by FIPS code and compute slope for each element
-    slopes = {}
+def compute_slopes_per_county(short_form_dfs: dict[str, pd.DataFrame]) -> dict[str, dict[str, float]]:
+    """Compute OLS slopes for each county and element type using short-form DataFrames.
 
-    for noaa_id in df['CNTYCODE'].unique():
+    Each DataFrame in short_form_dfs has:
+      - Index: CNTYCODE (5-digit string)
+      - Columns: YEAR (integers)
+      - Values: Temperature in Fahrenheit
+
+    Args:
+        short_form_dfs: Dictionary with keys 'tmean', 'tmax', 'tmin'.
+
+    Returns:
+        Nested dict: {padded_id: {f'tslopeFPerDecade_{elem}': slope}}
+    """
+    slopes: dict[str, dict[str, float]] = {}
+
+    # Get all unique county codes from any of the DataFrames
+    all_counties: set[str] = set()
+    for elem_name, elem_df in short_form_dfs.items():
+        all_counties.update(elem_df.index.dropna())
+
+    for noaa_id in sorted(all_counties):
         # Ensure we're working with a padded 5-char string to preserve leading zeros
         padded_id = str(noaa_id).zfill(5)
         noaa_state_code = int(padded_id[:2])
@@ -238,18 +354,32 @@ def compute_slopes_per_county(df):
         if not _is_valid_county(padded_id):
             continue
 
-        # Use the padded ID for consistent matching
-        county_data = df[df['CNTYCODE'] == padded_id]
-
         if padded_id not in slopes:
             slopes[padded_id] = {}
 
-        # Compute slopes for each temperature type
+        # Compute slopes for each temperature type using direct index lookup
         for elem_name in ['tmean', 'tmax', 'tmin']:
-            if elem_name in county_data.columns and not county_data[elem_name].isna().all():
-                elem_data = county_data[['YEAR', elem_name]].dropna()
-                slope = compute_ols_slopes(elem_data, value_col=elem_name)
-                slopes[padded_id][f'tslopeFPerDecade_{elem_name}'] = slope
+            if elem_name not in short_form_dfs:
+                continue
+            elem_df = short_form_dfs[elem_name]
+
+            # Direct row lookup by index (fast!)
+            if padded_id not in elem_df.index:
+                continue
+
+            year_row = elem_df.loc[padded_id]
+            # Drop NaN values, then extract year/value pairs
+            valid_data = year_row.dropna()
+            if len(valid_data) < 2:
+                slopes[padded_id][f'tslopeFPerDecade_{elem_name}'] = float(
+                    'nan')
+                continue
+
+            years = valid_data.index.astype(int).tolist()
+            values = valid_data.tolist()
+            slope = compute_ols_slopes(pd.DataFrame(
+                {'YEAR': years, 'VALUE': values}), value_col='VALUE')
+            slopes[padded_id][f'tslopeFPerDecade_{elem_name}'] = slope
 
     return slopes
 
@@ -436,60 +566,118 @@ def noaa_state_name(noaa_state_code: Union[str, int]) -> str:
     return name
 
 
+def _load_short_form_dfs(raw_dir: Path) -> dict[str, pd.DataFrame]:
+    """Load three short-form CSV files from the raw directory.
+
+    Each CSV has CNTYCODE as the first column (index), years as subsequent columns.
+    """
+    dfs: dict[str, pd.DataFrame] = {}
+    for elem_name in ['tmean', 'tmax', 'tmin']:
+        csv_path = raw_dir / f"annual_{elem_name}.csv"
+        if not csv_path.exists():
+            raise FileNotFoundError(
+                f"Expected short-form CSV not found: {csv_path}")
+        # Read with CNTYCODE as string, parse index column
+        df = pd.read_csv(csv_path, dtype={'CNTYCODE': str})
+        df = df.set_index('CNTYCODE')
+        # Convert column names to integers
+        df.columns = df.columns.astype(int)
+        dfs[elem_name] = df
+    return dfs
+
+
+def _save_short_form_dfs(dfs: dict[str, pd.DataFrame], raw_dir: Path) -> None:
+    """Save three short-form DataFrames to individual CSV files."""
+    for elem_name, df in dfs.items():
+        csv_path = raw_dir / f"annual_{elem_name}.csv"
+        df.to_csv(csv_path)
+        logger.info(
+            f"Saved {csv_path} ({len(df)} counties, {len(df.columns)} years)")
+
+
+def parse_args():
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser(
+        description="Process NOAA county climate data into datasets."
+    )
+    parser.add_argument(
+        "--force",
+        action="store_true",
+        default=False,
+        help="Force regeneration of cached short-form CSV files, ignoring existing cache."
+    )
+    return parser.parse_args()
+
+
 def main():
     """Main function to process NOAA county climate data."""
     logger.info("Starting data processing...")
 
+    # Parse command-line arguments
+    args = parse_args()
+    force_regenerate = getattr(args, 'force', False)
+
     # Read all raw files
     raw_dir = Path(__file__).parent / "raw"
-    annual_df_path = raw_dir / "annual_df.csv"
+    short_form_paths = [
+        raw_dir / f"annual_{elem}.csv" for elem in ['tmean', 'tmax', 'tmin']]
 
-    if not annual_df_path.exists():
-        logger.debug('Reading climdiv files')
+    # Use cache only if files exist AND --force flag is not set
+    use_cache = all(p.exists()
+                    for p in short_form_paths) and not force_regenerate
+    if use_cache:
+        logger.info('Using cached short-form CSVs. Load them.')
+    else:
+        if force_regenerate:
+            logger.info(
+                '--force flag set. Regenerating short-form CSVs from raw climdiv files.')
+        else:
+            logger.debug('Reading climdiv files')
         df = read_raw_files()
         logger.info(f"Read {len(df)} records")
 
-        # Aggregate to annual means by element type
-        logger.debug('Aggregating climdiv data')
-        annual_df = aggregate_to_annual_means(df)
-        logger.info(f"Aggregated to {len(annual_df)} county-year records")
+        logger.debug('Aggregating climdiv data into short-form DataFrames')
+        short_form_dfs = aggregate_to_short_form_dfs(df)
+        logger.info(
+            f"Short-form: tmean={len(short_form_dfs['tmean'])}x{len(short_form_dfs['tmean'].columns)}")
 
-        # Remove any rows with missing data for all three elements
-        annual_df = annual_df.dropna(
-            subset=['tmean', 'tmax', 'tmin'], how='all')
+        # Save short-form DataFrames to CSV
+        _save_short_form_dfs(short_form_dfs, raw_dir)
 
-        annual_df.to_csv(annual_df_path, index=False)
-    else:
-        logger.info('Output annual_df already exists. Loading.')
-        # FIX: Ensure CNTYCODE is read as string to preserve leading zeros.
-        # Without this, pandas infers int64 for numeric-looking IDs like "01001",
-        # which becomes integer 1001. Slicing str(1001)[:2] gives "10" instead of "01",
-        # causing incorrect NOAA state code mapping and downstream data mismatches.
-        annual_df = pd.read_csv(annual_df_path, dtype={'CNTYCODE': str})
+    if use_cache:
+        logger.info('Loading cached short-form CSVs.')
+        short_form_dfs = _load_short_form_dfs(raw_dir)
 
-    # Compute slopes for each county and element type
-    slopes = compute_slopes_per_county(annual_df)
+    # Get global year range from data
+    all_years: set[int] = set()
+    for elem_df in short_form_dfs.values():
+        all_years.update(elem_df.columns.astype(int).tolist())
+    min_year = min(all_years)
+    max_year = max(all_years)
+    logger.info(f"Year range: {min_year}-{max_year}")
+
+    # Compute slopes using optimized short-form method
+    slopes = compute_slopes_per_county(short_form_dfs)
+    logger.info(f"Computed slopes for {len(slopes)} counties")
+
+    # Collect all unique county NOAA IDs from short-form indices
+    all_counties: set[str] = set()
+    for elem_df in short_form_dfs.values():
+        all_counties.update(elem_df.index.dropna().astype(str).tolist())
 
     # Create metadata dictionary keyed by FIPS
-    meta_data = {}
-    series_data = {
-        "startYear": 1895,
+    meta_data: dict[str, dict] = {}
+    series_data: dict = {
+        "startYear": min_year,
         "series": {}
     }
 
-    # Get year range from data
-    min_year = annual_df['YEAR'].min()
-    max_year = annual_df['YEAR'].max()
-
-    # Process each county to build metadata and series
-    for noaa_id in annual_df['CNTYCODE'].unique():
+    # Process each county to build metadata and series using short-form lookups
+    for noaa_id in sorted(all_counties):
         # Ensure we're working with a padded 5-char string to preserve leading zeros.
-        # This is critical because NOAA uses its own ID system different from FIPS,
-        # and leading zeros must be preserved throughout the conversion process.
         padded_id = str(noaa_id).zfill(5)
 
         # NOAA has its own legacy code system that differs from FIPS
-        # We need to convert from NOAA to FIPS before anything else
         noaa_state_code = int(padded_id[:2])
         noaa_county_code = padded_id[2:]
 
@@ -498,81 +686,117 @@ def main():
                 f'Encountered NOAA state-order code over 50: {noaa_state_code}')
             continue
 
+        if not _is_valid_county(padded_id):
+            continue
+
         fips_state = noaa_state_to_fips(noaa_state_code)
 
         # Build the full FIPS code by combining the converted FIPS state code
         # with the original county code from the NOAA ID
         fips = fips_state + noaa_county_code
 
-        # Skip counties with invalid (reserved/unused) state FIPS codes
-        if not _is_valid_county(padded_id):
-            continue
-
-        county_data = annual_df[annual_df['CNTYCODE'] == padded_id]
-
-        # Get county name and state (placeholder implementation)
+        # Get county name and state
         name, state = get_county_info_from_fips(fips)
 
         # Build metadata entry
-        meta_entry = {
+        meta_entry: dict[str, str | float] = {
             "name": name,
             "state": state
         }
 
         # Add slope values if available
-        if fips in slopes:
-            for key, value in slopes[fips].items():
+        if padded_id in slopes:
+            for key, value in slopes[padded_id].items():
                 meta_entry[key] = value
 
         meta_data[fips] = meta_entry
 
-        # Build series data (columnar format)
-        years = county_data['YEAR'].tolist()
-        tmean_vals = county_data['tmean'].tolist()
-        tmax_vals = county_data['tmax'].tolist()
-        tmin_vals = county_data['tmin'].tolist()
+        # Build series data using short-form lookups (fast!)
+        # Find all years where at least one element has data for this county
+        year_sets: list[set[int]] = []
+        for elem_df in short_form_dfs.values():
+            if padded_id in elem_df.index:
+                valid_years = set(
+                    elem_df.loc[padded_id].dropna().index.astype(int))
+                year_sets.append(valid_years)
 
-        # Convert to integers representing tenths of degrees
-        series_entry = {
-            "tmean": [int(val * 10) if pd.notna(val) else None for val in tmean_vals],
-            "tmax": [int(val * 10) if pd.notna(val) else None for val in tmax_vals],
-            "tmin": [int(val * 10) if pd.notna(val) else None for val in tmin_vals]
-        }
+        if year_sets:
+            # Union of all years with any data
+            all_county_years = sorted(set().union(*year_sets))
 
-        series_data["series"][fips] = series_entry
+            # Extract values for each element at these specific years
+            series_entry: dict[str, list[int | None]] = {
+                "tmean": [],
+                "tmax": [],
+                "tmin": []
+            }
+
+            tmean_df = short_form_dfs.get('tmean', pd.DataFrame())
+            tmax_df = short_form_dfs.get('tmax', pd.DataFrame())
+            tmin_df = short_form_dfs.get('tmin', pd.DataFrame())
+
+            for year in all_county_years:
+                # tmean
+                if year in tmean_df.columns and padded_id in tmean_df.index:
+                    val = tmean_df.loc[padded_id, year]
+                    series_entry["tmean"].append(
+                        int(val * 10) if pd.notna(val) else None)
+                else:
+                    series_entry["tmean"].append(None)
+
+                # tmax
+                if year in tmax_df.columns and padded_id in tmax_df.index:
+                    val = tmax_df.loc[padded_id, year]
+                    series_entry["tmax"].append(
+                        int(val * 10) if pd.notna(val) else None)
+                else:
+                    series_entry["tmax"].append(None)
+
+                # tmin
+                if year in tmin_df.columns and padded_id in tmin_df.index:
+                    val = tmin_df.loc[padded_id, year]
+                    series_entry["tmin"].append(
+                        int(val * 10) if pd.notna(val) else None)
+                else:
+                    series_entry["tmin"].append(None)
+
+            series_data["series"][fips] = series_entry
 
     # Compute slope domains (percentiles)
-    slope_domains = {
+    slope_domains: dict[str, list[float]] = {
         "tmean": [-1.0, 1.0],
         "tmax": [-1.0, 1.0],
         "tmin": [-1.0, 1.0]
     }
 
     # Collect slopes by type for computing percentiles
-    tmean_slopes = []
-    tmax_slopes = []
-    tmin_slopes = []
+    tmean_slopes: list[float] = []
+    tmax_slopes: list[float] = []
+    tmin_slopes: list[float] = []
 
-    for fips, meta in meta_data.items():
+    for fips_val, meta in meta_data.items():
         for key, value in meta.items():
             if key.startswith('tslopeFPerDecade_'):
-                if np.isfinite(value):  # More robust NaN check using numpy
+                if isinstance(value, (int, float)) and np.isfinite(value):
                     if key == 'tslopeFPerDecade_tmean':
-                        tmean_slopes.append(value)
+                        tmean_slopes.append(float(value))
                     elif key == 'tslopeFPerDecade_tmax':
-                        tmax_slopes.append(value)
+                        tmax_slopes.append(float(value))
                     elif key == 'tslopeFPerDecade_tmin':
-                        tmin_slopes.append(value)
+                        tmin_slopes.append(float(value))
 
     # Compute percentiles for each type
     if tmean_slopes:
-        slope_domains["tmean"] = np.percentile(tmean_slopes, [1, 99]).tolist()
+        slope_domains["tmean"] = np.percentile(
+            tmean_slopes, [1, 99]).tolist()
 
     if tmax_slopes:
-        slope_domains["tmax"] = np.percentile(tmax_slopes, [1, 99]).tolist()
+        slope_domains["tmax"] = np.percentile(
+            tmax_slopes, [1, 99]).tolist()
 
     if tmin_slopes:
-        slope_domains["tmin"] = np.percentile(tmin_slopes, [1, 99]).tolist()
+        slope_domains["tmin"] = np.percentile(
+            tmin_slopes, [1, 99]).tolist()
 
     # Add domains to metadata
     meta_data_with_domains = {
