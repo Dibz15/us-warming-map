@@ -10,10 +10,15 @@ import { interpolateRgb } from "d3-interpolate";
 
 /**
  * Create a color scale function for temperature slopes.
- * @param domainExtent Maximum absolute value of the domain
- *   (e.g., `0.05` means domain is `[-0.05, 0.05]`).
+ * @param domain A two-element array `[min, max]` representing the data domain.
+ *   The scale is centered on 0 and uses the larger absolute value as the extent
+ *   to maintain symmetry (ensuring "no trend" stays white).
  */
-export function slopeColorScale(domainExtent: number): (slope: number) => string {
+export function slopeColorScale(domain: [number, number]): (slope: number) => string {
+  const absMin = Math.abs(domain[0]);
+  const absMax = Math.abs(domain[1]);
+  const domainExtent = Math.max(absMin, absMax);
+
   if (domainExtent <= 0) {
     // Degenerate case: return a neutral color for all slopes
     return () => "#f7f7f7";

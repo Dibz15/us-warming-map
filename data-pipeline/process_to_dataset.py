@@ -88,12 +88,14 @@ ELEMENT_CODES = {
 
 # State FIPS codes that were never assigned/used in the current standard.
 # These should be excluded from county data output.
+# - 02: Alaska (data gap after ~1980s, causes extreme slope outliers)
 # - 03: Reserved for American Samoa but never used (dropped in 1987 revision)
 # - 07: Reserved for Panama Canal Zone (defunct)
 # - 14: Reserved for Guam (never used in this standard)
+# - 15: Hawaii (data gap ending in ~1930s, causes extreme slope outliers)
 # - 43: Reserved for Puerto Rico (never used in this standard)
 # - 52: Reserved for Virgin Islands (never used in this standard)
-INVALID_STATE_FIPS = {"03", "07", "14", "43", "52"}
+INVALID_STATE_FIPS = {"02", "03", "07", "14", "15", "43", "52"}
 
 
 def _is_valid_county(noaa_id: str) -> bool:

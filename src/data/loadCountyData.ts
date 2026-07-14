@@ -74,15 +74,17 @@ function mergeMetaAndSeries(meta: MetaFile, series: SeriesFile): CountyDataset {
   return {
     generatedAt: meta.generatedAt,
     sourceYearRange: meta.sourceYearRange,
+    slopeDomains: meta.slopeDomains,
     counties,
   };
 }
 
 /** Fetch both split data files and return a merged CountyDataset. */
 export async function loadCountyClimate(): Promise<CountyDataset> {
+  const base = import.meta.env.BASE_URL; // "/" in dev, "/us-warming-map/" in CI
   const [metaRes, seriesRes] = await Promise.all([
-    fetch("/data/counties.meta.json"),
-    fetch("/data/counties.series.json"),
+    fetch(`${base}data/counties.meta.json`),
+    fetch(`${base}data/counties.series.json`),
   ]);
 
   if (!metaRes.ok || !seriesRes.ok) {
