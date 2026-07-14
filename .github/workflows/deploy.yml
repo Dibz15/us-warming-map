@@ -32,6 +32,18 @@ jobs:
         run: pip install -r requirements.txt
         working-directory: data-pipeline
 
+      - name: Cache raw NOAA data
+        uses: actions/cache@v4
+        with:
+          path: data-pipeline/raw
+          key: noaa-raw-${{ github.run_id }}
+          restore-keys: |
+            noaa-raw-
+
+      - name: Fetch raw NOAA data
+        run: python fetch_noaa_county_data.py
+        working-directory: data-pipeline
+
       - name: Run data preprocessing
         run: python process_to_dataset.py
         working-directory: data-pipeline
