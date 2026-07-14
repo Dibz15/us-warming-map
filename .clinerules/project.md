@@ -12,8 +12,8 @@ site never calls NOAA at runtime.
 
 ## Current state
 
-This is a bare scaffold. `src/` files are stubs that throw
-`not implemented`. Do not assume any dashboard functionality exists yet.
+A draft of the preprocessing pipeline has been implemented, and these files
+build into the current draft of the frontend UI map viewer.
 
 ## Module boundaries (keep these separate)
 
