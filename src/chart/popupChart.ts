@@ -88,22 +88,56 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
     .style("margin-bottom", "8px")
     .style("color", COLORS.textColor);
 
-  // Slope badge
-  const slopeVal = county.slopeFPerDecade;
-  const slopeStr = slopeVal.toFixed(2);
-  const isWarming = slopeVal > 0.001;
-  const isCooling = slopeVal < -0.001;
-  const slopeColor = isWarming ? COLORS.tmax : isCooling ? COLORS.tmin : COLORS.textColor;
-  const slopeLabel = isWarming ? `+${slopeStr}` : `${slopeStr}`;
+  // Helper to format a slope value with explicit sign prefix and appropriate color.
+  function formatSlope(
+    slope: number,
+    warmColor: string,
+    coolColor: string,
+  ): { label: string; color: string } {
+    const valStr = Math.abs(slope).toFixed(2);
+    const isWarming = slope > 0.001;
+    const isCooling = slope < -0.001;
+    const color = isWarming ? warmColor : isCooling ? coolColor : COLORS.textColor;
+    const prefix = isWarming ? "+" : isCooling ? "\u2212" : ""; // use Unicode minus (−) for reliability
+    return { label: `${prefix}${valStr}`, color };
+  }
 
-  overlay
+  // Create a slopes container with all three trends.
+  const slopesDiv = overlay
     .append("div")
-    .attr("class", "popup-slope")
-    .text(`${slopeLabel} °F/decade`)
-    .style("font-size", "11px")
-    .style("color", slopeColor)
+    .attr("class", "popup-slopes")
+    .style("display", "flex")
+    .style("flex-direction", "column")
+    .style("gap", "3px")
     .style("margin-bottom", "8px")
-    .style("font-weight", "500");
+    .style("min-width", "140px"); // Ensure space for ±X.XX °F/decade labels
+
+  // Tmax slope
+  const tmaxSlope = formatSlope(county.slopeTMax, COLORS.tmax, COLORS.tmin);
+  slopesDiv
+    .append("div")
+    .style("font-size", "11px")
+    .style("font-weight", "500")
+    .style("color", tmaxSlope.color)
+    .text(`${tmaxSlope.label} °F/decade (Tmax)`);
+
+  // Tmean slope
+  const tmeanSlope = formatSlope(county.slopeTMean, COLORS.tmax, COLORS.tmin);
+  slopesDiv
+    .append("div")
+    .style("font-size", "11px")
+    .style("font-weight", "500")
+    .style("color", tmeanSlope.color)
+    .text(`${tmeanSlope.label} °F/decade (Tmean)`);
+
+  // Tmin slope
+  const tminSlope = formatSlope(county.slopeTMin, COLORS.tmax, COLORS.tmin);
+  slopesDiv
+    .append("div")
+    .style("font-size", "11px")
+    .style("font-weight", "500")
+    .style("color", tminSlope.color)
+    .text(`${tminSlope.label} °F/decade (Tmin)`);
 
   // Chart SVG
   const chartDiv = overlay

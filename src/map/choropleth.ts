@@ -5,8 +5,9 @@
 import { feature } from "topojson-client";
 import { geoPath, geoAlbersUsa } from "d3-geo";
 import { select } from "d3-selection";
-import type { CountyDataset } from "@/types";
+import type { CountyDataset, CountyTrend } from "@/types";
 import type { slopeColorScale } from "./colorScale";
+import type { SlopeType } from "@/data/loadCountyData";
 
 // Extend SVGSVGElement to hold our runtime context reference.
 interface ExtendedSVGElement extends SVGSVGElement {
@@ -118,7 +119,7 @@ export function renderChoropleth(options: ChoroplethOptions): void {
       const fips = String(d.id).padStart(5, "0");
       const county = countyDataMap.get(fips);
       if (!county) return "#ccc"; // Missing data
-      return colorScale(county.slopeFPerDecade);
+      return colorScale(county.slopeTMean);
     })
     .attr("stroke", "#fff")
     .attr("stroke-width", 0.5)
@@ -183,4 +184,49 @@ export function renderChoropleth(options: ChoroplethOptions): void {
 
   // Store references on the SVG for later updates (e.g., re-coloring after popup closes)
   svg.__choroplethContext = { countyDataMap, colorScale };
+}
+
+/**
+ * Update the fill color of all county paths in the choropleth SVG
+ * based on a selected slope type (max, mean, or min).
+ */
+export function updateMapColors(
+  svgEl: SVGSVGElement,
+  slopeType: SlopeType,
+  dataset: CountyDataset,
+  colorScaleFn: typeof slopeColorScale,
+): void {
+  const svg = svgEl as unknown as ExtendedSVGElement;
+  const context = svg.__choroplethContext;
+  if (!context) return;
+
+  // Get the appropriate domain for this slope type.
+  const domain = dataset.slopeDomains[slopeType] ?? [-1, 1];
+
+  // Build a new color scale for this domain.
+  const scaledColorScale = colorScaleFn(domain);
+
+  // Map of slope type to the corresponding CountyTrend field name.
+  const SLOPE_FIELD: Record<
+    SlopeType,
+    keyof Pick<CountyTrend, "slopeTMax" | "slopeTMean" | "slopeTMin">
+  > = {
+    tmax: "slopeTMax",
+    tmean: "slopeTMean",
+    tmin: "slopeTMin",
+  };
+
+  const field = SLOPE_FIELD[slopeType];
+
+  // Update fill for each county path.
+  select(svgEl)
+    .selectAll<SVGPathElement, CountyFeature>(".county-path")
+    .attr("fill", (d) => {
+      const fips = String(d.id).padStart(5, "0");
+      const county = context.countyDataMap.get(fips);
+      if (!county) return "#ccc";
+      const slope = county[field] as number;
+      if (Number.isNaN(slope)) return "#ccc";
+      return scaledColorScale(slope);
+    });
 }

@@ -17,9 +17,13 @@ export interface CountyTrend {
   name: string;
   state: string;
   series: CountyYearRecord[];
-  // Precomputed OLS slope of the mean((tmax+tmin)/2) series, °F/decade.
-  // This is what drives the choropleth color scale.
-  slopeFPerDecade: number;
+  // Precomputed OLS slopes, °F/decade.
+  // slopeTMax: slope of the annual maximum temperature series
+  // slopeTMean: slope of the annual mean (tmax+tmin)/2 series (default)
+  // slopeTMin: slope of the annual minimum temperature series
+  slopeTMax: number;
+  slopeTMean: number;
+  slopeTMin: number;
 }
 
 export interface CountyDataset {

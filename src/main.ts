@@ -1,9 +1,9 @@
 // Entry point: load climate data + TopoJSON geometry, render choropleth map,
 // and wire county hover/tap events to show the popup temperature chart.
 
-import { loadCountyClimate, loadCountyGeometry } from "@/data/loadCountyData";
+import { loadCountyClimate, loadCountyGeometry, SlopeType } from "@/data/loadCountyData";
 import { slopeColorScale } from "@/map/colorScale";
-import { renderChoropleth } from "@/map/choropleth";
+import { renderChoropleth, updateMapColors } from "@/map/choropleth";
 import { showPopupChart } from "@/chart/popupChart";
 import type { CountyDataset } from "@/types";
 import type { PopupPosition } from "@/chart/popupChart";
@@ -46,6 +46,61 @@ async function main(): Promise<void> {
     return { x, y };
   }
 
+  // Track the current slope type (default to tmean / average).
+  let currentSlopeType: SlopeType = "tmean";
+
+  // Create settings toggle button and panel, appending directly to body
+  // so they remain visible above the SVG map layer.
+  const toggleBtn = document.createElement("button");
+  toggleBtn.id = "settings-toggle-btn";
+  toggleBtn.textContent = "\u2699 Scales"; // gear icon
+  toggleBtn.setAttribute("aria-label", "Toggle slope selector panel");
+  document.body.appendChild(toggleBtn);
+
+  // Create the slope selector panel.
+  const panel = document.createElement("div");
+  panel.className = "slope-selector-panel";
+  panel.style.display = "none";
+  panel.innerHTML = `
+    <div class="slope-selector-title">Color by slope:</div>
+    <div class="slope-option">
+      <input type="radio" name="slope-type" id="slope-tmax" value="tmax">
+      <label for="slope-tmax">Max Temp (Tmax)</label>
+    </div>
+    <div class="slope-option">
+      <input type="radio" name="slope-type" id="slope-tmean" value="tmean" checked>
+      <label for="slope-tmean">Avg Temp (Tmean)</label>
+    </div>
+    <div class="slope-option">
+      <input type="radio" name="slope-type" id="slope-tmin" value="tmin">
+      <label for="slope-tmin">Min Temp (Tmin)</label>
+    </div>
+  `;
+  document.body.appendChild(panel);
+
+  // Toggle panel visibility.
+  let panelVisible = false;
+  toggleBtn.addEventListener("click", () => {
+    panelVisible = !panelVisible;
+    panel.style.display = panelVisible ? "block" : "none";
+  });
+
+  // Wire radio button changes to update map colors.
+  const updateSlopeType = (type: SlopeType) => {
+    currentSlopeType = type;
+    const svgEl = document.getElementById("choropleth-svg") as SVGSVGElement | null;
+    if (svgEl) {
+      updateMapColors(svgEl, type, dataset, slopeColorScale);
+    }
+  };
+
+  panel.addEventListener("change", (e: Event) => {
+    const target = e.target as HTMLInputElement;
+    if (target.name === "slope-type" && target.value) {
+      updateSlopeType(target.value as SlopeType);
+    }
+  });
+
   // Render the choropleth.
   renderChoropleth({
     container: mapContainer,
@@ -68,6 +123,14 @@ async function main(): Promise<void> {
       showPopupChart({ container: mapContainer, county, position });
     },
   });
+
+  // Re-apply initial color on first render with default slope type.
+  updateMapColors(
+    document.getElementById("choropleth-svg") as unknown as SVGSVGElement,
+    currentSlopeType,
+    dataset,
+    slopeColorScale,
+  );
 
   console.log(`Rendered ${dataset.counties.length} counties.`);
 }

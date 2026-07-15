@@ -24,6 +24,9 @@ interface MetaFile {
   >;
 }
 
+/** Temperature type selector for the choropleth color mapping. */
+export type SlopeType = "tmax" | "tmean" | "tmin";
+
 /** Shape of counties.series.json */
 interface SeriesFile {
   startYear: number;
@@ -62,12 +65,23 @@ function mergeMetaAndSeries(meta: MetaFile, series: SeriesFile): CountyDataset {
       });
     }
 
+    // Extract all three slopes from the meta entry.
+    const tmaxSlope = (metaEntry as Record<string, unknown>)["tslopeFPerDecade_tmax"] as
+      number | undefined;
+    const tmeanSlope = (metaEntry as Record<string, unknown>)[
+      "tslopeFPerDecade_tmean"
+    ] as number | undefined;
+    const tminSlope = (metaEntry as Record<string, unknown>)["tslopeFPerDecade_tmin"] as
+      number | undefined;
+
     counties.push({
       fips,
       name: metaEntry.name,
       state: metaEntry.state,
       series: rawSeries,
-      slopeFPerDecade: metaEntry.tslopeFPerDecade_tmean ?? Number.NaN,
+      slopeTMax: tmaxSlope ?? Number.NaN,
+      slopeTMean: tmeanSlope ?? Number.NaN,
+      slopeTMin: tminSlope ?? Number.NaN,
     });
   }
 

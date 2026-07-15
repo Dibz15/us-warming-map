@@ -142,3 +142,64 @@ body {
 #footer a:hover {
   text-decoration: underline;
 }
+
+/* Settings panel toggle button (direct child of body) */
+#settings-toggle-btn {
+  position: fixed;
+  top: 10px;
+  right: 16px;
+  z-index: 2000;
+  background: #333;
+  color: #ffffff;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: background 0.15s;
+}
+
+#settings-toggle-btn:hover {
+  background: #555;
+}
+
+/* Temperature slope selector panel (direct child of body) */
+.slope-selector-panel {
+  position: fixed;
+  top: 48px;
+  right: 16px;
+  z-index: 2000;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 12px 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  font-size: 13px;
+  min-width: 170px;
+}
+
+.slope-selector-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--color-text);
+}
+
+.slope-option {
+  display: flex;
+  align-items: center;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.slope-option input[type="radio"] {
+  margin-right: 6px;
+  cursor: pointer;
+}
+
+.slope-option label {
+  cursor: pointer;
+  user-select: none;
+}
