@@ -15,7 +15,6 @@ interface ExtendedSVGElement extends SVGSVGElement {
   __choroplethContext?: {
     countyDataMap: Map<string, NonNullable<CountyDataset["counties"]>[number]>;
     colorScale: ReturnType<typeof slopeColorScale>;
-    magExtent: number;
   };
 }
 
@@ -184,15 +183,8 @@ export function renderChoropleth(options: ChoroplethOptions): void {
       }
     });
 
-  // Compute DTR magnitude extent from domain data
-  const dtrDom = dataset.slopeDomains["dtr"] ?? [-1, 1];
-  const magDom = dataset.slopeDomains["tmean"] ?? [-1, 1];
-  const dtrExtent = Math.abs(dtrDom[1]);
-  const meanExtent = Math.max(Math.abs(magDom[0]), Math.abs(magDom[1]));
-  const effectiveMagExtent = Math.max(dtrExtent, meanExtent);
-
   // Store references on the SVG for later updates (e.g., re-coloring after popup closes)
-  svg.__choroplethContext = { countyDataMap, colorScale, magExtent: effectiveMagExtent };
+  svg.__choroplethContext = { countyDataMap, colorScale };
 }
 
 /**
@@ -212,8 +204,7 @@ export function updateMapColors(
   if (slopeType === "dtr") {
     // DTR mode uses the two-channel color function.
     const dtrDom = dataset.slopeDomains["dtr"] ?? [-1, 1];
-    const magExtent = context.magExtent;
-    const dtrColorFn = dtrColorScale(dtrDom, magExtent);
+    const dtrColorFn = dtrColorScale(dtrDom);
 
     select(svgEl)
       .selectAll<SVGPathElement, CountyFeature>(".county-path")
@@ -223,9 +214,8 @@ export function updateMapColors(
         if (!county) return "#ccc";
         const dtrSlope = county.slopeDTR;
         const dtrStdErr = county.slopeDTRStdErr;
-        const meanSlope = county.slopeTMean;
         if (Number.isNaN(dtrSlope)) return "#ccc";
-        return dtrColorFn(dtrSlope, meanSlope, dtrStdErr);
+        return dtrColorFn(dtrSlope, 0, dtrStdErr);
       });
     return;
   }

@@ -45,20 +45,22 @@ export function slopeColorScale(domain: [number, number]): (slope: number) => st
  *   Negative dtrSlope (nights leading, DTR narrowing) → purple
  *   Positive dtrSlope (days leading, DTR widening)     → amber/orange
  *
- * Magnitude channel: |meanSlope| controls saturation/lightness.
- *   Near-zero overall warming → pale neutral gray
- *   Strong overall warming    → full-saturation hue
+ * Magnitude channel: |dtrSlope| controls saturation/lightness.
+ *   Near-zero DTR (no diurnal divergence) → pale neutral gray
+ *   Strong DTR                            → full-saturation hue
+ *
+ * This ensures counties with opposing day/night trends that cancel in the
+ * mean (e.g., tmax=+0.02, tmin=-0.02 → mean≈0) still show strong DTR colors
+ * because the magnitude comes from |DTR| itself, not |meanSlope|.
  *
  * Significance masking: if |dtrSlope| < 2 * dtrSlopeStdErr,
  * render desaturated/gray to indicate statistical insignificance.
  *
- * @param dtrDomain Symmetric domain for the DTR hue (e.g. [-5, 5])
- * @param magExtent Magnitude extent for |meanSlope| saturation
+ * @param dtrDomain Asymmetric domain for the DTR hue (e.g. [-2, 5])
  */
 export function dtrColorScale(
   dtrDomain: [number, number],
-  magExtent: number,
-): (dtrSlope: number, meanSlope: number, dtrStdErr: number) => string {
+): (dtrSlope: number, _meanSlope: number, dtrStdErr: number) => string {
   // PuOr diverging palette — purple (narrowing) ↔ amber/orange (widening)
   const hueColors = [
     "#5e4fa2", // deep purple (negative)
@@ -70,26 +72,39 @@ export function dtrColorScale(
     "#fc8d59", // amber/orange (positive)
   ];
 
-  const dtrExtent = Math.abs(dtrDomain[1]);
-  if (dtrExtent <= 0 || magExtent <= 0) {
+  const dtrMin = dtrDomain[0];
+  const dtrMax = dtrDomain[1];
+
+  if (dtrMax <= dtrMin) {
     return () => "#e0e0e0"; // pale neutral gray
   }
 
+  // Use asymmetric domain directly for accurate color mapping
+  const dtrExtentNeg = Math.abs(dtrMin);
+  const dtrExtentPos = dtrMax;
+
   // Diverging hue scale from purple to amber via PuOr-inspired colors
   const hueScale = scaleLinear<string>()
-    .domain([-dtrExtent, -dtrExtent * 0.5, 0, dtrExtent * 0.5, dtrExtent])
+    .domain([dtrMin, dtrMin * 0.5, 0, dtrMax * 0.5, dtrMax])
     .range(hueColors)
     .interpolate(interpolateRgb);
 
-  // Neutral pale gray base for low-magnitude counties
+  // Neutral pale gray base for low-magnitude DTR counties
   const neutralGray = "#e8e8e8";
 
-  return (dtrSlope: number, meanSlope: number, dtrStdErr: number): string => {
-    // Clamp DTR to domain
-    const clampedDtr = Math.max(-dtrExtent, Math.min(dtrExtent, dtrSlope));
+  // Maximum |DTR| for magnitude blending (use the larger extent)
+  const maxDtrMagnitude = Math.max(dtrExtentNeg, dtrExtentPos);
 
-    // Magnitude factor: clamp |meanSlope| / magExtent to [0, 1]
-    const magT = Math.min(1, Math.abs(meanSlope) / magExtent);
+  // Keep meanSlope in the signature for API compatibility with callers, but
+  // prefix with _ so TypeScript knows it's intentionally unused.
+  return (dtrSlope: number, _meanSlope: number, dtrStdErr: number): string => {
+    // Clamp DTR to domain
+    const clampedDtr = Math.max(dtrMin, Math.min(dtrMax, dtrSlope));
+
+    // Magnitude factor: clamp |dtrSlope| / maxDtrMagnitude to [0, 1]
+    // This ensures strong DTR signals (whether positive or negative) get full saturation
+    // regardless of what the mean trend does.
+    const magT = Math.min(1, Math.abs(clampedDtr) / maxDtrMagnitude);
 
     // Significance check: not distinguishable from zero DTR
     const isSignificant = true; //Math.abs(dtrSlope) >= 2 * dtrStdErr;

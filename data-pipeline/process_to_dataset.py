@@ -812,11 +812,13 @@ def main():
         slope_domains["tmin"] = np.percentile(
             tmin_slopes, [1, 99]).tolist()
 
-    # Compute DTR domain (symmetric around 0, using absolute values)
+    # Compute DTR domain from actual signed DTR slopes (preserving asymmetry).
+    # DTR = tmax_slope - tmin_slope can be negative (narrowing DTR) or positive (widening).
+    # Using asymmetric percentiles ensures the domain matches the actual data distribution.
     if dtr_slopes:
-        abs_dtr = [abs(d) for d in dtr_slopes]
-        extent = float(np.percentile(abs_dtr, 99))
-        slope_domains["dtr"] = [-extent, extent]
+        slope_domains["dtr"] = np.percentile(
+            dtr_slopes, [1, 99]
+        ).tolist()
 
     # Add domains to metadata
     meta_data_with_domains = {

@@ -139,11 +139,7 @@ async function main(): Promise<void> {
   /** Populate the DTR 2D legend swatches with colors from the color scale. */
   function populateDTRLegend(legendEl: HTMLElement, data: CountyDataset): void {
     const dtrDom = data.slopeDomains["dtr"] ?? [-1, 1];
-    const magDom = data.slopeDomains["tmean"] ?? [-1, 1];
-    const dtrExtent = Math.abs(dtrDom[1]);
-    const meanExtent = Math.max(Math.abs(magDom[0]), Math.abs(magDom[1]));
-    const effectiveMagExtent = Math.max(dtrExtent, meanExtent);
-    const colorFn = dtrColorScale(dtrDom, effectiveMagExtent);
+    const colorFn = dtrColorScale(dtrDom);
 
     const swatchesContainer =
       legendEl.querySelector<HTMLDivElement>(".dtr-legend-swatches");
@@ -157,17 +153,24 @@ async function main(): Promise<void> {
     swatchesBottomContainer.innerHTML = "";
 
     const hueLabels = ["Nights ↓", "", "Even", "", "Days ↑", "", ""];
-    const magnitudeLevels = [0, 0.33, 0.67, 1]; // from little to more overall warming
+    // Magnitude levels relative to the DTR domain extent (now the magnitude reference).
+    const magnitudeLevels = [0, 0.33, 0.67, 1];
+
+    // Compute the larger absolute extent for scaling.
+    const dtrMin = dtrDom[0];
+    const dtrMax = dtrDom[1];
+    const dtrExtent = Math.max(Math.abs(dtrMin), Math.abs(dtrMax));
 
     for (let row = 0; row < 3; row++) {
       const magLevel = magnitudeLevels[row + 1] ?? 0.5;
       for (let col = 0; col < 7; col++) {
         const hueLevel = (col / 6) * 2 - 1; // -1 to +1
         const dtrSlope = hueLevel * dtrExtent;
-        const meanSlope = magLevel * effectiveMagExtent;
+        // Use DTR magnitude as the magnitude factor now.
+        const dtrMag = magLevel * dtrExtent;
         // Use a small standard error for the "significant" legend examples.
-        const fakeStdErr = dtrExtent * 0.05;
-        const color = colorFn(dtrSlope, meanSlope, fakeStdErr);
+        const fakeStdErr = Math.abs(dtrSlope) * 0.05;
+        const color = colorFn(dtrSlope, dtrMag, fakeStdErr);
 
         const swatch = document.createElement("div");
         swatch.style.backgroundColor = color;
