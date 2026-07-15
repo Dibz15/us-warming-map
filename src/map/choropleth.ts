@@ -7,6 +7,7 @@ import { geoPath, geoAlbersUsa } from "d3-geo";
 import { select } from "d3-selection";
 import type { CountyDataset, CountyTrend } from "@/types";
 import type { slopeColorScale } from "./colorScale";
+import { dtrColorScale } from "./colorScale";
 import type { SlopeType } from "@/data/loadCountyData";
 
 // Extend SVGSVGElement to hold our runtime context reference.
@@ -14,6 +15,7 @@ interface ExtendedSVGElement extends SVGSVGElement {
   __choroplethContext?: {
     countyDataMap: Map<string, NonNullable<CountyDataset["counties"]>[number]>;
     colorScale: ReturnType<typeof slopeColorScale>;
+    magExtent: number;
   };
 }
 
@@ -182,13 +184,20 @@ export function renderChoropleth(options: ChoroplethOptions): void {
       }
     });
 
+  // Compute DTR magnitude extent from domain data
+  const dtrDom = dataset.slopeDomains["dtr"] ?? [-1, 1];
+  const magDom = dataset.slopeDomains["tmean"] ?? [-1, 1];
+  const dtrExtent = Math.abs(dtrDom[1]);
+  const meanExtent = Math.max(Math.abs(magDom[0]), Math.abs(magDom[1]));
+  const effectiveMagExtent = Math.max(dtrExtent, meanExtent);
+
   // Store references on the SVG for later updates (e.g., re-coloring after popup closes)
-  svg.__choroplethContext = { countyDataMap, colorScale };
+  svg.__choroplethContext = { countyDataMap, colorScale, magExtent: effectiveMagExtent };
 }
 
 /**
  * Update the fill color of all county paths in the choropleth SVG
- * based on a selected slope type (max, mean, or min).
+ * based on a selected slope type (max, mean, min, or dtr).
  */
 export function updateMapColors(
   svgEl: SVGSVGElement,
@@ -200,6 +209,27 @@ export function updateMapColors(
   const context = svg.__choroplethContext;
   if (!context) return;
 
+  if (slopeType === "dtr") {
+    // DTR mode uses the two-channel color function.
+    const dtrDom = dataset.slopeDomains["dtr"] ?? [-1, 1];
+    const magExtent = context.magExtent;
+    const dtrColorFn = dtrColorScale(dtrDom, magExtent);
+
+    select(svgEl)
+      .selectAll<SVGPathElement, CountyFeature>(".county-path")
+      .attr("fill", (d) => {
+        const fips = String(d.id).padStart(5, "0");
+        const county = context.countyDataMap.get(fips);
+        if (!county) return "#ccc";
+        const dtrSlope = county.slopeDTR;
+        const dtrStdErr = county.slopeDTRStdErr;
+        const meanSlope = county.slopeTMean;
+        if (Number.isNaN(dtrSlope)) return "#ccc";
+        return dtrColorFn(dtrSlope, meanSlope, dtrStdErr);
+      });
+    return;
+  }
+
   // Get the appropriate domain for this slope type.
   const domain = dataset.slopeDomains[slopeType] ?? [-1, 1];
 
@@ -208,7 +238,7 @@ export function updateMapColors(
 
   // Map of slope type to the corresponding CountyTrend field name.
   const SLOPE_FIELD: Record<
-    SlopeType,
+    string,
     keyof Pick<CountyTrend, "slopeTMax" | "slopeTMean" | "slopeTMin">
   > = {
     tmax: "slopeTMax",

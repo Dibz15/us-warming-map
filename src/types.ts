@@ -21,9 +21,13 @@ export interface CountyTrend {
   // slopeTMax: slope of the annual maximum temperature series
   // slopeTMean: slope of the annual mean (tmax+tmin)/2 series (default)
   // slopeTMin: slope of the annual minimum temperature series
+  // slopeDTR: diurnal temperature range slope (tmaxSlope - tminSlope), °F/decade
+  // slopeDTRStdErr: standard error of the DTR slope, computed from tmax/tmin stdErr values
   slopeTMax: number;
   slopeTMean: number;
   slopeTMin: number;
+  slopeDTR: number;
+  slopeDTRStdErr: number;
 }
 
 export interface CountyDataset {

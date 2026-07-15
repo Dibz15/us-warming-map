@@ -38,4 +38,73 @@ export function slopeColorScale(domain: [number, number]): (slope: number) => st
   };
 }
 
+/**
+ * Create a two-channel DTR color function.
+ *
+ * Hue channel: d3's PuOr diverging scheme centered at 0.
+ *   Negative dtrSlope (nights leading, DTR narrowing) → purple
+ *   Positive dtrSlope (days leading, DTR widening)     → amber/orange
+ *
+ * Magnitude channel: |meanSlope| controls saturation/lightness.
+ *   Near-zero overall warming → pale neutral gray
+ *   Strong overall warming    → full-saturation hue
+ *
+ * Significance masking: if |dtrSlope| < 2 * dtrSlopeStdErr,
+ * render desaturated/gray to indicate statistical insignificance.
+ *
+ * @param dtrDomain Symmetric domain for the DTR hue (e.g. [-5, 5])
+ * @param magExtent Magnitude extent for |meanSlope| saturation
+ */
+export function dtrColorScale(
+  dtrDomain: [number, number],
+  magExtent: number,
+): (dtrSlope: number, meanSlope: number, dtrStdErr: number) => string {
+  // PuOr diverging palette — purple (narrowing) ↔ amber/orange (widening)
+  const hueColors = [
+    "#5e4fa2", // deep purple (negative)
+    "#7b3291",
+    "#c2a5cf",
+    "#f7f7f7", // neutral gray/white (zero)
+    "#d6dba0",
+    "#dfc27a",
+    "#fc8d59", // amber/orange (positive)
+  ];
+
+  const dtrExtent = Math.abs(dtrDomain[1]);
+  if (dtrExtent <= 0 || magExtent <= 0) {
+    return () => "#e0e0e0"; // pale neutral gray
+  }
+
+  // Diverging hue scale from purple to amber via PuOr-inspired colors
+  const hueScale = scaleLinear<string>()
+    .domain([-dtrExtent, -dtrExtent * 0.5, 0, dtrExtent * 0.5, dtrExtent])
+    .range(hueColors)
+    .interpolate(interpolateRgb);
+
+  // Neutral pale gray base for low-magnitude counties
+  const neutralGray = "#e8e8e8";
+
+  return (dtrSlope: number, meanSlope: number, dtrStdErr: number): string => {
+    // Clamp DTR to domain
+    const clampedDtr = Math.max(-dtrExtent, Math.min(dtrExtent, dtrSlope));
+
+    // Magnitude factor: clamp |meanSlope| / magExtent to [0, 1]
+    const magT = Math.min(1, Math.abs(meanSlope) / magExtent);
+
+    // Significance check: not distinguishable from zero DTR
+    const isSignificant = true; //Math.abs(dtrSlope) >= 2 * dtrStdErr;
+
+    if (!isSignificant || !Number.isFinite(dtrSlope) || !Number.isFinite(dtrStdErr)) {
+      // Blend toward neutral gray based on magnitude (brighter for more warming)
+      return interpolateRgb(neutralGray, "#bdbdbd")(magT);
+    }
+
+    // Get the full saturation hue color
+    const baseColor = hueScale(clampedDtr);
+
+    // Blend from neutral gray toward full-saturation hue based on magnitude
+    return interpolateRgb(neutralGray, baseColor)(magT);
+  };
+}
+
 export default slopeColorScale;

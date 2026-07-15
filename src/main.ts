@@ -2,7 +2,7 @@
 // and wire county hover/tap events to show the popup temperature chart.
 
 import { loadCountyClimate, loadCountyGeometry, SlopeType } from "@/data/loadCountyData";
-import { slopeColorScale } from "@/map/colorScale";
+import { slopeColorScale, dtrColorScale } from "@/map/colorScale";
 import { renderChoropleth, updateMapColors } from "@/map/choropleth";
 import { showPopupChart } from "@/chart/popupChart";
 import type { CountyDataset } from "@/types";
@@ -62,21 +62,54 @@ async function main(): Promise<void> {
   panel.className = "slope-selector-panel";
   panel.style.display = "none";
   panel.innerHTML = `
-    <div class="slope-selector-title">Color by slope:</div>
-    <div class="slope-option">
-      <input type="radio" name="slope-type" id="slope-tmax" value="tmax">
-      <label for="slope-tmax">Max Temp (Tmax)</label>
-    </div>
-    <div class="slope-option">
-      <input type="radio" name="slope-type" id="slope-tmean" value="tmean" checked>
-      <label for="slope-tmean">Avg Temp (Tmean)</label>
-    </div>
-    <div class="slope-option">
-      <input type="radio" name="slope-type" id="slope-tmin" value="tmin">
-      <label for="slope-tmin">Min Temp (Tmin)</label>
-    </div>
-  `;
+     <div class="slope-selector-title">Color by slope:</div>
+     <div class="slope-option">
+       <input type="radio" name="slope-type" id="slope-tmax" value="tmax">
+       <label for="slope-tmax">Max Temp (Tmax)</label>
+     </div>
+     <div class="slope-option">
+       <input type="radio" name="slope-type" id="slope-tmean" value="tmean" checked>
+       <label for="slope-tmean">Avg Temp (Tmean)</label>
+     </div>
+     <div class="slope-option">
+       <input type="radio" name="slope-type" id="slope-tmin" value="tmin">
+       <label for="slope-tmin">Min Temp (Tmin)</label>
+     </div>
+     <div class="slope-option">
+       <input type="radio" name="slope-type" id="slope-dtr" value="dtr">
+       <label for="slope-dtr">Diurnal Temp Range (DTR)</label>
+     </div>
+   `;
   document.body.appendChild(panel);
+
+  // Create the DTR 2D legend (hidden by default, shown only in DTR mode).
+  const dtrLegend = document.createElement("div");
+  dtrLegend.id = "dtr-legend";
+  dtrLegend.className = "dtr-legend";
+  dtrLegend.style.display = "none";
+  dtrLegend.innerHTML = `
+     <div class="dtr-legend-title">Diurnal Temperature Range</div>
+     <div class="dtr-legend-row">
+       <span class="dtr-legend-y-label">More Overall Warming</span>
+       <div class="dtr-legend-hue-row">
+         <span class="dtr-legend-x-label-north">Nights Leading (DTR ↓)</span>
+         <div class="dtr-legend-swatches"></div>
+         <span class="dtr-legend-x-label-south">Days Leading (DTR ↑)</span>
+       </div>
+     </div>
+     <div class="dtr-legend-row">
+       <span class="dtr-legend-y-label">Less Overall Warming</span>
+       <div class="dtr-legend-hue-row-bottom">
+         <span class="dtr-legend-x-label-north"></span>
+         <div class="dtr-legend-swatches-bottom"></div>
+         <span class="dtr-legend-x-label-south"></span>
+       </div>
+     </div>
+     <div class="dtr-legend-insignificant">
+       <span class="dtr-legend-swatch-gray"></span> Not statistically significant (|DTR| < 2× SE)
+     </div>
+   `;
+  document.body.appendChild(dtrLegend);
 
   // Toggle panel visibility.
   let panelVisible = false;
@@ -85,14 +118,87 @@ async function main(): Promise<void> {
     panel.style.display = panelVisible ? "block" : "none";
   });
 
-  // Wire radio button changes to update map colors.
+  // Wire radio button changes to update map colors and legend.
   const updateSlopeType = (type: SlopeType) => {
     currentSlopeType = type;
     const svgEl = document.getElementById("choropleth-svg") as SVGSVGElement | null;
     if (svgEl) {
       updateMapColors(svgEl, type, dataset, slopeColorScale);
     }
+
+    // Show/hide DTR legend and populate swatches when in DTR mode.
+    const legendEl = document.getElementById("dtr-legend") as HTMLElement | null;
+    if (legendEl && type === "dtr") {
+      legendEl.style.display = "block";
+      populateDTRLegend(legendEl, dataset);
+    } else if (legendEl) {
+      legendEl.style.display = "none";
+    }
   };
+
+  /** Populate the DTR 2D legend swatches with colors from the color scale. */
+  function populateDTRLegend(legendEl: HTMLElement, data: CountyDataset): void {
+    const dtrDom = data.slopeDomains["dtr"] ?? [-1, 1];
+    const magDom = data.slopeDomains["tmean"] ?? [-1, 1];
+    const dtrExtent = Math.abs(dtrDom[1]);
+    const meanExtent = Math.max(Math.abs(magDom[0]), Math.abs(magDom[1]));
+    const effectiveMagExtent = Math.max(dtrExtent, meanExtent);
+    const colorFn = dtrColorScale(dtrDom, effectiveMagExtent);
+
+    const swatchesContainer =
+      legendEl.querySelector<HTMLDivElement>(".dtr-legend-swatches");
+    const swatchesBottomContainer = legendEl.querySelector<HTMLDivElement>(
+      ".dtr-legend-swatches-bottom",
+    );
+    if (!swatchesContainer || !swatchesBottomContainer) return;
+
+    // Clear existing swatches.
+    swatchesContainer.innerHTML = "";
+    swatchesBottomContainer.innerHTML = "";
+
+    const hueLabels = ["Nights ↓", "", "Even", "", "Days ↑", "", ""];
+    const magnitudeLevels = [0, 0.33, 0.67, 1]; // from little to more overall warming
+
+    for (let row = 0; row < 3; row++) {
+      const magLevel = magnitudeLevels[row + 1] ?? 0.5;
+      for (let col = 0; col < 7; col++) {
+        const hueLevel = (col / 6) * 2 - 1; // -1 to +1
+        const dtrSlope = hueLevel * dtrExtent;
+        const meanSlope = magLevel * effectiveMagExtent;
+        // Use a small standard error for the "significant" legend examples.
+        const fakeStdErr = dtrExtent * 0.05;
+        const color = colorFn(dtrSlope, meanSlope, fakeStdErr);
+
+        const swatch = document.createElement("div");
+        swatch.style.backgroundColor = color;
+        swatch.style.border = "1px solid rgba(0,0,0,0.1)";
+        swatch.style.borderRadius = "1px";
+
+        if (row < 2) {
+          swatchesContainer.appendChild(swatch);
+        } else {
+          swatchesBottomContainer.appendChild(swatch);
+        }
+      }
+    }
+
+    // Add labels to the hue row.
+    const hueRow = legendEl.querySelector<HTMLDivElement>(".dtr-legend-hue-row");
+    if (hueRow) {
+      const existingLabels = hueRow.querySelectorAll(".dtr-hue-label");
+      existingLabels.forEach((l) => l.remove());
+
+      for (let i = 0; i < 7; i++) {
+        const label = document.createElement("span");
+        label.className = "dtr-hue-label";
+        label.style.fontSize = "8px";
+        label.style.textAlign = "center";
+        label.style.flex = "1";
+        label.textContent = hueLabels[i] ?? "";
+        hueRow.appendChild(label);
+      }
+    }
+  }
 
   panel.addEventListener("change", (e: Event) => {
     const target = e.target as HTMLInputElement;

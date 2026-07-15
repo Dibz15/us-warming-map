@@ -20,12 +20,15 @@ interface MetaFile {
       tslopeFPerDecade_tmean?: number;
       tslopeFPerDecade_tmax?: number;
       tslopeFPerDecade_tmin?: number;
+      tslopeFPerDecade_dtr?: number;
+      tslopeStdErr_tmax?: number;
+      tslopeStdErr_tmin?: number;
     }
   >;
 }
 
 /** Temperature type selector for the choropleth color mapping. */
-export type SlopeType = "tmax" | "tmean" | "tmin";
+export type SlopeType = "tmax" | "tmean" | "tmin" | "dtr";
 
 /** Shape of counties.series.json */
 interface SeriesFile {
@@ -73,6 +76,26 @@ function mergeMetaAndSeries(meta: MetaFile, series: SeriesFile): CountyDataset {
     ] as number | undefined;
     const tminSlope = (metaEntry as Record<string, unknown>)["tslopeFPerDecade_tmin"] as
       number | undefined;
+    const tmaxStdErr = (metaEntry as Record<string, unknown>)["tslopeStdErr_tmax"] as
+      number | undefined;
+    const tminStdErr = (metaEntry as Record<string, unknown>)["tslopeStdErr_tmin"] as
+      number | undefined;
+
+    // Compute DTR slope and its standard error
+    const dtrSlope =
+      typeof tmaxSlope === "number" &&
+      typeof tminSlope === "number" &&
+      Number.isFinite(tmaxSlope) &&
+      Number.isFinite(tminSlope)
+        ? tmaxSlope - tminSlope
+        : Number.NaN;
+    const dtrStdErr =
+      typeof tmaxStdErr === "number" &&
+      typeof tminStdErr === "number" &&
+      Number.isFinite(tmaxStdErr) &&
+      Number.isFinite(tminStdErr)
+        ? Math.sqrt(tmaxStdErr ** 2 + tminStdErr ** 2)
+        : Number.NaN;
 
     counties.push({
       fips,
@@ -82,6 +105,8 @@ function mergeMetaAndSeries(meta: MetaFile, series: SeriesFile): CountyDataset {
       slopeTMax: tmaxSlope ?? Number.NaN,
       slopeTMean: tmeanSlope ?? Number.NaN,
       slopeTMin: tminSlope ?? Number.NaN,
+      slopeDTR: dtrSlope,
+      slopeDTRStdErr: dtrStdErr,
     });
   }
 

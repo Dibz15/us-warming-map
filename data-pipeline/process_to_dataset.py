@@ -301,28 +301,28 @@ def aggregate_to_short_form_dfs(df):
 
 
 def compute_ols_slopes(df, value_col='VALUE'):
-    """Compute OLS slope for a series of values.
+    """Compute OLS slope and standard error for a series of values.
 
     Args:
         df: DataFrame with 'YEAR' column and a value column (default 'VALUE').
         value_col: Name of the value column to use for regression.
     Returns:
-        Slope coefficient, or NaN if regression fails.
+        Tuple of (slope, slope_std_err), or (nan, nan) if regression fails.
     """
     if len(df) < 2:
-        return float('nan')
+        return float('nan'), float('nan')
 
     # Use scipy.stats.linregress for robust linear regression
     try:
         result = stats.linregress(df['YEAR'], df[value_col])
-        # Return just the slope coefficient (first element of the named tuple)
-        return float(result[0])
+        # Return slope coefficient and its standard error
+        return float(result.slope), float(result.stderr)
     except Exception:
-        return float('nan')
+        return float('nan'), float('nan')
 
 
 def compute_slopes_per_county(short_form_dfs: dict[str, pd.DataFrame]) -> dict[str, dict[str, float]]:
-    """Compute OLS slopes for each county and element type using short-form DataFrames.
+    """Compute OLS slopes and standard errors for each county and element type using short-form DataFrames.
 
     Each DataFrame in short_form_dfs has:
       - Index: CNTYCODE (5-digit string)
@@ -333,7 +333,7 @@ def compute_slopes_per_county(short_form_dfs: dict[str, pd.DataFrame]) -> dict[s
         short_form_dfs: Dictionary with keys 'tmean', 'tmax', 'tmin'.
 
     Returns:
-        Nested dict: {padded_id: {f'tslopeFPerDecade_{elem}': slope}}
+        Nested dict: {padded_id: {f'tslopeFPerDecade_{elem}': slope, f'tslopeStdErr_{elem}': std_err}}
     """
     slopes: dict[str, dict[str, float]] = {}
 
@@ -375,13 +375,15 @@ def compute_slopes_per_county(short_form_dfs: dict[str, pd.DataFrame]) -> dict[s
             if len(valid_data) < 2:
                 slopes[padded_id][f'tslopeFPerDecade_{elem_name}'] = float(
                     'nan')
+                slopes[padded_id][f'tslopeStdErr_{elem_name}'] = float('nan')
                 continue
 
             years = valid_data.index.astype(int).tolist()
             values = valid_data.tolist()
-            slope = compute_ols_slopes(pd.DataFrame(
+            slope, std_err = compute_ols_slopes(pd.DataFrame(
                 {'YEAR': years, 'VALUE': values}), value_col='VALUE')
             slopes[padded_id][f'tslopeFPerDecade_{elem_name}'] = slope
+            slopes[padded_id][f'tslopeStdErr_{elem_name}'] = std_err
 
     return slopes
 
@@ -775,6 +777,7 @@ def main():
     tmean_slopes: list[float] = []
     tmax_slopes: list[float] = []
     tmin_slopes: list[float] = []
+    dtr_slopes: list[float] = []
 
     for fips_val, meta in meta_data.items():
         for key, value in meta.items():
@@ -786,6 +789,15 @@ def main():
                         tmax_slopes.append(float(value))
                     elif key == 'tslopeFPerDecade_tmin':
                         tmin_slopes.append(float(value))
+
+    # Compute DTR slopes and their percentiles
+    for padded_id, slope_dict in slopes.items():
+        max_slope = slope_dict.get('tslopeFPerDecade_tmax')
+        min_slope = slope_dict.get('tslopeFPerDecade_tmin')
+        if (isinstance(max_slope, (int, float)) and np.isfinite(max_slope) and
+                isinstance(min_slope, (int, float)) and np.isfinite(min_slope)):
+            dtr_slope = max_slope - min_slope
+            dtr_slopes.append(float(dtr_slope))
 
     # Compute percentiles for each type
     if tmean_slopes:
@@ -799,6 +811,12 @@ def main():
     if tmin_slopes:
         slope_domains["tmin"] = np.percentile(
             tmin_slopes, [1, 99]).tolist()
+
+    # Compute DTR domain (symmetric around 0, using absolute values)
+    if dtr_slopes:
+        abs_dtr = [abs(d) for d in dtr_slopes]
+        extent = float(np.percentile(abs_dtr, 99))
+        slope_domains["dtr"] = [-extent, extent]
 
     # Add domains to metadata
     meta_data_with_domains = {
