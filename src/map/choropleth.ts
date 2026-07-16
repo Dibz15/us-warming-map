@@ -2,9 +2,14 @@
 // colored by src/map/colorScale.ts, with hover/tap handlers that hand off
 // to src/chart/popupChart.ts.
 
+// d3-transition must be imported to augment d3-selection's Selection interface
+// with the `.transition()` method via TypeScript module augmentation.
+import "d3-transition";
+
 import { feature } from "topojson-client";
 import { geoPath, geoAlbersUsa } from "d3-geo";
 import { select } from "d3-selection";
+import { zoom, zoomIdentity } from "d3-zoom";
 import type { CountyDataset, CountyTrend } from "@/types";
 import type { slopeColorScale } from "./colorScale";
 import { dtrColorScale, ampColorScale } from "./colorScale";
@@ -44,7 +49,7 @@ export function renderChoropleth(options: ChoroplethOptions): void {
   select(container).selectAll("*").remove();
 
   // Create SVG container
-  const svg = select(container)
+  const svgEl = select(container)
     .append("svg")
     .attr("id", "choropleth-svg")
     .attr("width", "100%")
@@ -53,8 +58,30 @@ export function renderChoropleth(options: ChoroplethOptions): void {
     .attr("preserveAspectRatio", "xMidYMid meet")
     .node() as unknown as ExtendedSVGElement;
 
-  const g = svg ? select(svg).append("g").attr("id", "counties-group") : null;
-  if (!svg || !g) return;
+  const g = svgEl ? select(svgEl).append("g").attr("id", "counties-group") : null;
+  if (!svgEl || !g) return;
+
+  // Apply initial transform to center the map.
+  g.attr("transform", "");
+
+  // Add zoom/pan support for mobile and desktop.
+  const zoomBehavior = zoom<SVGSVGElement, unknown>()
+    .scaleExtent([1, 8])
+    .on("zoom", (event: { transform: { toString: () => string } }) => {
+      g.attr("transform", event.transform.toString());
+    });
+
+  select(svgEl).call(zoomBehavior);
+
+  // Double-click to reset zoom.
+  select(svgEl)
+    .style("pointer-events", "all")
+    .on("dblclick.zoom", (_event: MouseEvent) => {
+      select<SVGSVGElement, unknown>(svgEl)
+        .transition()
+        .duration(750)
+        .call(zoomBehavior.transform, zoomIdentity);
+    });
 
   // Create projection and path generator
   const projection = geoAlbersUsa().scale(1100).translate([480, 300]);
@@ -184,7 +211,7 @@ export function renderChoropleth(options: ChoroplethOptions): void {
     });
 
   // Store references on the SVG for later updates (e.g., re-coloring after popup closes)
-  svg.__choroplethContext = { countyDataMap, colorScale };
+  svgEl.__choroplethContext = { countyDataMap, colorScale };
 }
 
 /**
