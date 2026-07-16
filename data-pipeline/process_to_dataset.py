@@ -7,10 +7,12 @@ Steps:
   1. Parse fixed-width climdiv files into a long-format DataFrame
      (fips, year, tmax, tmin, tmean).
   2. Drop counties/years with insufficient coverage.
-  3. Fit an OLS trend to the annual mean((tmax+tmin)/2) series per county
-     to get slopeFPerDecade (drives the choropleth color).
-  4. Join FIPS codes to county/state names in county_lookup.json.
-  5. Write public/data/counties.meta.json and public/data/counties.series.json.
+  3. Compute annual aggregates: tmean, tmax, tmin, and true_dtr.
+     - true_dtr = mean of (monthly Tmax_j - Tmin_j) across all 12 months
+  4. Fit OLS trends per county to get slopes for tmean, tmax, tmin, true_dtr.
+  5. Compute seasonal_amplitude = slope(tmax) - slope(tmin).
+  6. Join FIPS codes to county/state names in county_lookup.json.
+  7. Write public/data/counties.meta.json and public/data/counties.series.json.
 
 This implementation splits the output into two files:
 - counties.meta.json: metadata and slopes keyed by FIPS
@@ -163,59 +165,8 @@ def read_raw_files():
     return combined_df
 
 
-def aggregate_to_annual_means(df):
-    """Aggregate monthly data to annual means by element type.
-
-    Only computes annual aggregates for years with all 12 months of data.
-    Partial-year values are set to NaN to prevent misleading statistics.
-
-    Returns a long-form DataFrame with one row per county-year-element combo
-    (tmean, tmax, tmin), and separate columns for CNTYCODE and YEAR.
-    """
-    temp_cols = ['JAN', 'FEB', 'MAR', 'APR', 'MAY',
-                 'JUNE', 'JULY', 'AUG', 'SEPT', 'OCT', 'NOV', 'DEC']
-
-    # Filter for each element type
-    results = []
-
-    for elem_code, elem_name in ELEMENT_CODES.items():
-        elem_df = df[df['ELEMENT'] == elem_code].copy()
-
-        # Check which rows have all 12 months of data (no NaN values)
-        complete_mask = elem_df[temp_cols].notna().all(axis=1)
-
-        if elem_code == 2:  # Average temperature - take mean of months
-            elem_df['VALUE'] = elem_df[temp_cols].mean(axis=1)
-        elif elem_code == 27:  # Maximum temperature - take max of months
-            elem_df['VALUE'] = elem_df[temp_cols].max(axis=1)
-        elif elem_code == 28:  # Minimum temperature - take min of months
-            elem_df['VALUE'] = elem_df[temp_cols].min(axis=1)
-
-        # Set VALUE to NaN for rows with incomplete data
-        elem_df.loc[~complete_mask, 'VALUE'] = np.nan
-
-        # Keep only necessary columns
-        elem_df = elem_df[['CNTYCODE', 'YEAR', 'VALUE']]
-        elem_df['ELEMENT'] = elem_name
-
-        results.append(elem_df)
-
-    # Combine all element types
-    final_df = pd.concat(results, ignore_index=True)
-
-    # Pivot to have one row per county-year with separate columns for each element
-    pivot_df = final_df.pivot_table(
-        index=['CNTYCODE', 'YEAR'],
-        columns='ELEMENT',
-        values='VALUE',
-        aggfunc='first'  # In case of duplicates, take first (shouldn't happen)
-    ).reset_index()
-
-    return pivot_df
-
-
 def aggregate_to_short_form_dfs(df):
-    """Aggregate monthly data to three short-form DataFrames (one per element type).
+    """Aggregate monthly data to short-form DataFrames (one per element type + true_dtr).
 
     Each DataFrame has:
       - Index: CNTYCODE (5-digit string)
@@ -225,19 +176,48 @@ def aggregate_to_short_form_dfs(df):
     Only computes annual aggregates for years with all 12 months of data.
     Partial-year values are set to NaN to prevent misleading statistics.
 
-    Steps:
-      1. Compute annual values per element type (tmean, tmax, tmin).
-      2. Drop county-year rows where ALL three elements are NaN.
-      3. Pivot each element into its own short-form DataFrame.
+    Element types:
+      - tmean: mean of monthly averages
+      - tmax: max of monthly averages
+      - tmin: min of monthly averages
+      - true_dtr: mean of (monthly Tmax_j - Tmin_j) across all 12 months
+        This is the "true" diurnal temperature range trend source.
 
     Returns:
-        dict: {'tmean': df, 'tmax': df, 'tmin': df}
+        dict: {'tmean': df, 'tmax': df, 'tmin': df, 'true_dtr': df}
     """
     temp_cols = ['JAN', 'FEB', 'MAR', 'APR', 'MAY',
                  'JUNE', 'JULY', 'AUG', 'SEPT', 'OCT', 'NOV', 'DEC']
 
-    # Compute annual values for each element type and collect in long-form
-    rows: list[dict] = []
+    # Compute True DTR: for each row (county+year+element_type), we need both
+    # tmax and tmin monthly values to compute monthly differences.
+    # First, get tmax and tmin monthly data, indexed by CNTYCODE and YEAR
+    tmax_monthly = df[df['ELEMENT'] == 27].set_index(['CNTYCODE', 'YEAR'])[
+        temp_cols].copy()
+    tmin_monthly = df[df['ELEMENT'] == 28].set_index(['CNTYCODE', 'YEAR'])[
+        temp_cols].copy()
+
+    # Align by multi-index (county, year) and compute monthly DTR differences
+    # Reindex to ensure both have the same index union before subtracting
+    tmax_monthly = tmax_monthly.reindex(
+        index=tmax_monthly.index.union(tmin_monthly.index))
+    tmin_monthly = tmin_monthly.reindex(index=tmax_monthly.index)
+
+    # Compute monthly DTR differences (tmax_j - tmin_j for each month j)
+    monthly_dtr_diffs = tmax_monthly - tmin_monthly
+
+    # Average across all 12 months for annual True DTR
+    monthly_dtr_diffs['ANNUAL_TRUE_DTR'] = monthly_dtr_diffs[temp_cols].mean(
+        axis=1)
+
+    # Check which rows have all 12 months of data for both tmax and tmin
+    tmax_complete = tmax_monthly[temp_cols].notna().all(axis=1)
+    tmin_complete = tmin_monthly[temp_cols].notna().all(axis=1)
+    dtr_complete_mask = tmax_complete & tmin_complete
+    monthly_dtr_diffs.loc[~dtr_complete_mask, 'ANNUAL_TRUE_DTR'] = np.nan
+
+    # Now compute annual values for each element type and collect in long-form
+    rows: list[pd.DataFrame] = []
     for elem_code, elem_name in ELEMENT_CODES.items():
         elem_df = df[df['ELEMENT'] == elem_code].copy()
 
@@ -257,64 +237,79 @@ def aggregate_to_short_form_dfs(df):
         # Select only needed columns and rename VALUE to element name
         selected = elem_df[['CNTYCODE', 'YEAR', 'VALUE']].copy()
         selected[elem_name] = selected['VALUE']
-        rows.append(selected[['CNTYCODE', 'YEAR', elem_name]])
+        selected['ELEMENT'] = elem_name
+        rows.append(selected)
+
+    # Add True DTR rows using the computed monthly differences
+    # Reset index to get CNTYCODE and YEAR columns from the indexed DataFrame
+    dtr_long_df = monthly_dtr_diffs.reset_index(
+    )[['CNTYCODE', 'YEAR', 'ANNUAL_TRUE_DTR']].copy()
+    dtr_long_df.rename(columns={'ANNUAL_TRUE_DTR': 'VALUE'}, inplace=True)
+    dtr_long_df['ELEMENT'] = 'true_dtr'
+    rows.append(dtr_long_df)
 
     # Combine all element types into one long-form DataFrame
     long_df = pd.concat(rows, ignore_index=True)
 
     # Pivot to wide form (one row per county, columns=year, one sub-table per elem)
-    # Start with tmean
-    wide_tmean = long_df.pivot_table(
+    wide_tmean = long_df[long_df['ELEMENT'] == 'tmean'].pivot_table(
         index='CNTYCODE',
         columns='YEAR',
-        values='tmean',
+        values='VALUE',
         aggfunc='first'
     )
-    wide_tmax = long_df.pivot_table(
+    wide_tmax = long_df[long_df['ELEMENT'] == 'tmax'].pivot_table(
         index='CNTYCODE',
         columns='YEAR',
-        values='tmax',
+        values='VALUE',
         aggfunc='first'
     )
-    wide_tmin = long_df.pivot_table(
+    wide_tmin = long_df[long_df['ELEMENT'] == 'tmin'].pivot_table(
         index='CNTYCODE',
         columns='YEAR',
-        values='tmin',
+        values='VALUE',
+        aggfunc='first'
+    )
+    wide_tdtr = long_df[long_df['ELEMENT'] == 'true_dtr'].pivot_table(
+        index='CNTYCODE',
+        columns='YEAR',
+        values='VALUE',
         aggfunc='first'
     )
 
-    # Drop county-year rows where ALL three elements are NaN from each DF
-    # (We drop entire rows where the county has no data for that element)
+    # Drop county-year rows where ALL values are NaN from each DF
     wide_tmean = wide_tmean.dropna(how='all')
     wide_tmax = wide_tmax.dropna(how='all')
     wide_tmin = wide_tmin.dropna(how='all')
+    wide_tdtr = wide_tdtr.dropna(how='all')
 
     # Ensure column types are integers
-    for df_elem in [wide_tmean, wide_tmax, wide_tmin]:
+    for df_elem in [wide_tmean, wide_tmax, wide_tmin, wide_tdtr]:
         df_elem.columns = df_elem.columns.astype(int)
 
     return {
         'tmean': wide_tmean.sort_index(),
         'tmax': wide_tmax.sort_index(),
-        'tmin': wide_tmin.sort_index()
+        'tmin': wide_tmin.sort_index(),
+        'true_dtr': wide_tdtr.sort_index()
     }
 
 
-def compute_ols_slopes(df, value_col='VALUE'):
+def compute_ols_slopes(values: list[float], years: list[int]):
     """Compute OLS slope and standard error for a series of values.
 
     Args:
-        df: DataFrame with 'YEAR' column and a value column (default 'VALUE').
-        value_col: Name of the value column to use for regression.
+        values: List of temperature values.
+        years: List of corresponding year values.
     Returns:
         Tuple of (slope, slope_std_err), or (nan, nan) if regression fails.
     """
-    if len(df) < 2:
+    if len(values) < 2:
         return float('nan'), float('nan')
 
     # Use scipy.stats.linregress for robust linear regression
     try:
-        result = stats.linregress(df['YEAR'], df[value_col])
+        result = stats.linregress(years, values)
         # Return slope coefficient and its standard error
         return float(result.slope), float(result.stderr)
     except Exception:
@@ -330,7 +325,7 @@ def compute_slopes_per_county(short_form_dfs: dict[str, pd.DataFrame]) -> dict[s
       - Values: Temperature in Fahrenheit
 
     Args:
-        short_form_dfs: Dictionary with keys 'tmean', 'tmax', 'tmin'.
+        short_form_dfs: Dictionary with keys 'tmean', 'tmax', 'tmin', 'true_dtr'.
 
     Returns:
         Nested dict: {padded_id: {f'tslopeFPerDecade_{elem}': slope, f'tslopeStdErr_{elem}': std_err}}
@@ -360,9 +355,7 @@ def compute_slopes_per_county(short_form_dfs: dict[str, pd.DataFrame]) -> dict[s
             slopes[padded_id] = {}
 
         # Compute slopes for each temperature type using direct index lookup
-        for elem_name in ['tmean', 'tmax', 'tmin']:
-            if elem_name not in short_form_dfs:
-                continue
+        for elem_name in short_form_dfs.keys():
             elem_df = short_form_dfs[elem_name]
 
             # Direct row lookup by index (fast!)
@@ -380,8 +373,7 @@ def compute_slopes_per_county(short_form_dfs: dict[str, pd.DataFrame]) -> dict[s
 
             years = valid_data.index.astype(int).tolist()
             values = valid_data.tolist()
-            slope, std_err = compute_ols_slopes(pd.DataFrame(
-                {'YEAR': years, 'VALUE': values}), value_col='VALUE')
+            slope, std_err = compute_ols_slopes(values, years)
             slopes[padded_id][f'tslopeFPerDecade_{elem_name}'] = slope
             slopes[padded_id][f'tslopeStdErr_{elem_name}'] = std_err
 
@@ -571,12 +563,12 @@ def noaa_state_name(noaa_state_code: Union[str, int]) -> str:
 
 
 def _load_short_form_dfs(raw_dir: Path) -> dict[str, pd.DataFrame]:
-    """Load three short-form CSV files from the raw directory.
+    """Load short-form CSV files from the raw directory.
 
     Each CSV has CNTYCODE as the first column (index), years as subsequent columns.
     """
     dfs: dict[str, pd.DataFrame] = {}
-    for elem_name in ['tmean', 'tmax', 'tmin']:
+    for elem_name in ['tmean', 'tmax', 'tmin', 'true_dtr']:
         csv_path = raw_dir / f"annual_{elem_name}.csv"
         if not csv_path.exists():
             raise FileNotFoundError(
@@ -591,7 +583,7 @@ def _load_short_form_dfs(raw_dir: Path) -> dict[str, pd.DataFrame]:
 
 
 def _save_short_form_dfs(dfs: dict[str, pd.DataFrame], raw_dir: Path) -> None:
-    """Save three short-form DataFrames to individual CSV files."""
+    """Save short-form DataFrames to individual CSV files."""
     for elem_name, df in dfs.items():
         csv_path = raw_dir / f"annual_{elem_name}.csv"
         df.to_csv(csv_path)
@@ -624,7 +616,7 @@ def main():
     # Read all raw files
     raw_dir = Path(__file__).parent / "raw"
     short_form_paths = [
-        raw_dir / f"annual_{elem}.csv" for elem in ['tmean', 'tmax', 'tmin']]
+        raw_dir / f"annual_{elem}.csv" for elem in ['tmean', 'tmax', 'tmin', 'true_dtr']]
 
     # Use cache only if files exist AND --force flag is not set
     use_cache = all(p.exists()
@@ -655,7 +647,7 @@ def main():
     # Get global year range from data
     all_years: set[int] = set()
     for elem_df in short_form_dfs.values():
-        all_years.update(elem_df.columns.astype(int).tolist())
+        all_years.update(int(c) for c in elem_df.columns)
     min_year = min(all_years)
     max_year = max(all_years)
     logger.info(f"Year range: {min_year}-{max_year}")
@@ -667,7 +659,7 @@ def main():
     # Collect all unique county NOAA IDs from short-form indices
     all_counties: set[str] = set()
     for elem_df in short_form_dfs.values():
-        all_counties.update(elem_df.index.dropna().astype(str).tolist())
+        all_counties.update(str(x) for x in elem_df.index.dropna())
 
     # Create metadata dictionary keyed by FIPS
     meta_data: dict[str, dict] = {}
@@ -721,7 +713,7 @@ def main():
         for elem_df in short_form_dfs.values():
             if padded_id in elem_df.index:
                 valid_years = set(
-                    elem_df.loc[padded_id].dropna().index.astype(int))
+                    int(x) for x in elem_df.loc[padded_id].dropna().index)
                 year_sets.append(valid_years)
 
         if year_sets:
@@ -732,19 +724,21 @@ def main():
             series_entry: dict[str, list[int | None]] = {
                 "tmean": [],
                 "tmax": [],
-                "tmin": []
+                "tmin": [],
+                "true_dtr": []
             }
 
             tmean_df = short_form_dfs.get('tmean', pd.DataFrame())
             tmax_df = short_form_dfs.get('tmax', pd.DataFrame())
             tmin_df = short_form_dfs.get('tmin', pd.DataFrame())
+            tdtr_df = short_form_dfs.get('true_dtr', pd.DataFrame())
 
             for year in all_county_years:
                 # tmean
                 if year in tmean_df.columns and padded_id in tmean_df.index:
                     val = tmean_df.loc[padded_id, year]
                     series_entry["tmean"].append(
-                        int(val * 10) if pd.notna(val) else None)
+                        int(float(val) * 10) if pd.notna(val) else None)
                 else:
                     series_entry["tmean"].append(None)
 
@@ -752,7 +746,7 @@ def main():
                 if year in tmax_df.columns and padded_id in tmax_df.index:
                     val = tmax_df.loc[padded_id, year]
                     series_entry["tmax"].append(
-                        int(val * 10) if pd.notna(val) else None)
+                        int(float(val) * 10) if pd.notna(val) else None)
                 else:
                     series_entry["tmax"].append(None)
 
@@ -760,9 +754,17 @@ def main():
                 if year in tmin_df.columns and padded_id in tmin_df.index:
                     val = tmin_df.loc[padded_id, year]
                     series_entry["tmin"].append(
-                        int(val * 10) if pd.notna(val) else None)
+                        int(float(val) * 10) if pd.notna(val) else None)
                 else:
                     series_entry["tmin"].append(None)
+
+                # true_dtr
+                if year in tdtr_df.columns and padded_id in tdtr_df.index:
+                    val = tdtr_df.loc[padded_id, year]
+                    series_entry["true_dtr"].append(
+                        int(float(val) * 10) if pd.notna(val) else None)
+                else:
+                    series_entry["true_dtr"].append(None)
 
             series_data["series"][fips] = series_entry
 
@@ -770,14 +772,17 @@ def main():
     slope_domains: dict[str, list[float]] = {
         "tmean": [-1.0, 1.0],
         "tmax": [-1.0, 1.0],
-        "tmin": [-1.0, 1.0]
+        "tmin": [-1.0, 1.0],
+        "true_dtr": [-5.0, 5.0],
+        "seasonal_amplitude": [-3.0, 3.0]
     }
 
     # Collect slopes by type for computing percentiles
     tmean_slopes: list[float] = []
     tmax_slopes: list[float] = []
     tmin_slopes: list[float] = []
-    dtr_slopes: list[float] = []
+    true_dtr_slopes: list[float] = []
+    seasonal_amp_slopes: list[float] = []
 
     for fips_val, meta in meta_data.items():
         for key, value in meta.items():
@@ -789,15 +794,17 @@ def main():
                         tmax_slopes.append(float(value))
                     elif key == 'tslopeFPerDecade_tmin':
                         tmin_slopes.append(float(value))
+                    elif key == 'tslopeFPerDecade_true_dtr':
+                        true_dtr_slopes.append(float(value))
 
-    # Compute DTR slopes and their percentiles
+    # Compute seasonal_amplitude = slope(tmax) - slope(tmin) for each county
     for padded_id, slope_dict in slopes.items():
         max_slope = slope_dict.get('tslopeFPerDecade_tmax')
         min_slope = slope_dict.get('tslopeFPerDecade_tmin')
         if (isinstance(max_slope, (int, float)) and np.isfinite(max_slope) and
                 isinstance(min_slope, (int, float)) and np.isfinite(min_slope)):
-            dtr_slope = max_slope - min_slope
-            dtr_slopes.append(float(dtr_slope))
+            seasonal_amp = max_slope - min_slope
+            seasonal_amp_slopes.append(float(seasonal_amp))
 
     # Compute percentiles for each type
     if tmean_slopes:
@@ -812,12 +819,19 @@ def main():
         slope_domains["tmin"] = np.percentile(
             tmin_slopes, [1, 99]).tolist()
 
-    # Compute DTR domain from actual signed DTR slopes (preserving asymmetry).
-    # DTR = tmax_slope - tmin_slope can be negative (narrowing DTR) or positive (widening).
-    # Using asymmetric percentiles ensures the domain matches the actual data distribution.
-    if dtr_slopes:
-        slope_domains["dtr"] = np.percentile(
-            dtr_slopes, [1, 99]
+    # Compute true_dtr domain from actual DTR slopes (preserving asymmetry).
+    # true_dtr = mean(Tmax_j - Tmin_j) can be negative (narrowing DTR) or positive (widening).
+    if true_dtr_slopes:
+        slope_domains["true_dtr"] = np.percentile(
+            true_dtr_slopes, [1, 99]
+        ).tolist()
+
+    # Compute seasonal_amplitude domain.
+    # Seasonal amplitude change = slope(tmax) - slope(tmin) can be negative (narrowing)
+    # or positive (widening). Using asymmetric percentiles ensures the domain matches.
+    if seasonal_amp_slopes:
+        slope_domains["seasonal_amplitude"] = np.percentile(
+            seasonal_amp_slopes, [1, 99]
         ).tolist()
 
     # Add domains to metadata

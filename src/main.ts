@@ -75,10 +75,14 @@ async function main(): Promise<void> {
        <input type="radio" name="slope-type" id="slope-tmin" value="tmin">
        <label for="slope-tmin">Min Temp (Tmin)</label>
      </div>
-     <div class="slope-option">
-       <input type="radio" name="slope-type" id="slope-dtr" value="dtr">
-       <label for="slope-dtr">Diurnal Temp Range (DTR)</label>
-     </div>
+        <div class="slope-option">
+          <input type="radio" name="slope-type" id="slope-true_dtr" value="true_dtr">
+          <label for="slope-true_dtr">True Diurnal Temp Range (DTR)</label>
+        </div>
+        <div class="slope-option">
+          <input type="radio" name="slope-type" id="slope-seasonal_amp" value="seasonal_amplitude">
+          <label for="slope-seasonal_amp">Seasonal Amplitude</label>
+        </div>
    `;
   document.body.appendChild(panel);
 
@@ -88,7 +92,7 @@ async function main(): Promise<void> {
   dtrLegend.className = "dtr-legend";
   dtrLegend.style.display = "none";
   dtrLegend.innerHTML = `
-     <div class="dtr-legend-title">Diurnal Temperature Range</div>
+     <div class="dtr-legend-title">True Diurnal Temperature Range</div>
      <div class="dtr-legend-row">
        <span class="dtr-legend-y-label">More Overall Warming</span>
        <div class="dtr-legend-hue-row">
@@ -126,9 +130,9 @@ async function main(): Promise<void> {
       updateMapColors(svgEl, type, dataset, slopeColorScale);
     }
 
-    // Show/hide DTR legend and populate swatches when in DTR mode.
+    // Show/hide DTR legend and populate swatches when in true_dtr mode.
     const legendEl = document.getElementById("dtr-legend") as HTMLElement | null;
-    if (legendEl && type === "dtr") {
+    if (legendEl && type === "true_dtr") {
       legendEl.style.display = "block";
       populateDTRLegend(legendEl, dataset);
     } else if (legendEl) {
@@ -138,7 +142,7 @@ async function main(): Promise<void> {
 
   /** Populate the DTR 2D legend swatches with colors from the color scale. */
   function populateDTRLegend(legendEl: HTMLElement, data: CountyDataset): void {
-    const dtrDom = data.slopeDomains["dtr"] ?? [-1, 1];
+    const dtrDom = data.slopeDomains["true_dtr"] ?? [-5, 5];
     const colorFn = dtrColorScale(dtrDom);
 
     const swatchesContainer =

@@ -1,7 +1,7 @@
 // Loads and merges the precomputed NOAA climate dataset (produced by
 // data-pipeline/process_to_dataset.py) from two JSON files:
 //   - public/data/counties.meta.json   (name, state, slope per county)
-//   - public/data/counties.series.json (columnar tmean/tmax/tmin arrays)
+//   - public/data/counties.series.json (columnar tmean/tmax/tmin/true_dtr arrays)
 //
 // Merges them into a single CountyDataset matching the type in types.ts.
 
@@ -20,15 +20,16 @@ interface MetaFile {
       tslopeFPerDecade_tmean?: number;
       tslopeFPerDecade_tmax?: number;
       tslopeFPerDecade_tmin?: number;
-      tslopeFPerDecade_dtr?: number;
+      tslopeFPerDecade_true_dtr?: number;
       tslopeStdErr_tmax?: number;
       tslopeStdErr_tmin?: number;
+      tslopeStdErr_true_dtr?: number;
     }
   >;
 }
 
 /** Temperature type selector for the choropleth color mapping. */
-export type SlopeType = "tmax" | "tmean" | "tmin" | "dtr";
+export type SlopeType = "tmax" | "tmean" | "tmin" | "true_dtr" | "seasonal_amplitude";
 
 /** Shape of counties.series.json */
 interface SeriesFile {
@@ -39,6 +40,7 @@ interface SeriesFile {
       tmean: number[] | null;
       tmax: number[] | null;
       tmin: number[] | null;
+      true_dtr: number[] | null;
     }
   >;
 }
@@ -65,10 +67,11 @@ function mergeMetaAndSeries(meta: MetaFile, series: SeriesFile): CountyDataset {
         year,
         tmax: seriesEntry.tmax?.[i] != null ? seriesEntry.tmax[i] / 10 : NaN,
         tmin: seriesEntry.tmin?.[i] != null ? seriesEntry.tmin[i] / 10 : NaN,
+        true_dtr: seriesEntry.true_dtr?.[i] != null ? seriesEntry.true_dtr[i] / 10 : NaN,
       });
     }
 
-    // Extract all three slopes from the meta entry.
+    // Extract all slopes from the meta entry.
     const tmaxSlope = (metaEntry as Record<string, unknown>)["tslopeFPerDecade_tmax"] as
       number | undefined;
     const tmeanSlope = (metaEntry as Record<string, unknown>)[
@@ -76,25 +79,47 @@ function mergeMetaAndSeries(meta: MetaFile, series: SeriesFile): CountyDataset {
     ] as number | undefined;
     const tminSlope = (metaEntry as Record<string, unknown>)["tslopeFPerDecade_tmin"] as
       number | undefined;
-    const tmaxStdErr = (metaEntry as Record<string, unknown>)["tslopeStdErr_tmax"] as
-      number | undefined;
-    const tminStdErr = (metaEntry as Record<string, unknown>)["tslopeStdErr_tmin"] as
-      number | undefined;
 
-    // Compute DTR slope and its standard error
-    const dtrSlope =
+    // True DTR slope from meta if available, otherwise compute from tmax/tmin slopes.
+    const trueDtrSlope =
+      typeof (metaEntry as Record<string, unknown>)["tslopeFPerDecade_true_dtr"] ===
+      "number"
+        ? ((metaEntry as Record<string, unknown>)["tslopeFPerDecade_true_dtr"] as number)
+        : typeof tmaxSlope === "number" &&
+            Number.isFinite(tmaxSlope) &&
+            typeof tminSlope === "number" &&
+            Number.isFinite(tminSlope)
+          ? tmaxSlope - tminSlope
+          : Number.NaN;
+
+    const rawStdErrTmax = (metaEntry as Record<string, unknown>)["tslopeStdErr_tmax"];
+    const rawStdErrTmin = (metaEntry as Record<string, unknown>)["tslopeStdErr_tmin"];
+    const stdErrTmax = typeof rawStdErrTmax === "number" ? rawStdErrTmax : 0;
+    const stdErrTmin = typeof rawStdErrTmin === "number" ? rawStdErrTmin : 0;
+
+    // Compute true DTR standard error from propagated uncertainty
+    let computedTrueDtrStdErr: number = Number.NaN;
+    if (
+      typeof tmaxSlope === "number" &&
+      typeof tminSlope === "number" &&
+      Number.isFinite(tmaxSlope) &&
+      Number.isFinite(tminSlope)
+    ) {
+      computedTrueDtrStdErr = Math.sqrt(stdErrTmax ** 2 + stdErrTmin ** 2);
+    }
+
+    const trueDtrStdErr =
+      typeof (metaEntry as Record<string, unknown>)["tslopeStdErr_true_dtr"] === "number"
+        ? ((metaEntry as Record<string, unknown>)["tslopeStdErr_true_dtr"] as number)
+        : computedTrueDtrStdErr;
+
+    // Seasonal amplitude = slope(tmax) - slope(tmin)
+    const seasonalAmpSlope =
       typeof tmaxSlope === "number" &&
       typeof tminSlope === "number" &&
       Number.isFinite(tmaxSlope) &&
       Number.isFinite(tminSlope)
         ? tmaxSlope - tminSlope
-        : Number.NaN;
-    const dtrStdErr =
-      typeof tmaxStdErr === "number" &&
-      typeof tminStdErr === "number" &&
-      Number.isFinite(tmaxStdErr) &&
-      Number.isFinite(tminStdErr)
-        ? Math.sqrt(tmaxStdErr ** 2 + tminStdErr ** 2)
         : Number.NaN;
 
     counties.push({
@@ -105,8 +130,9 @@ function mergeMetaAndSeries(meta: MetaFile, series: SeriesFile): CountyDataset {
       slopeTMax: tmaxSlope ?? Number.NaN,
       slopeTMean: tmeanSlope ?? Number.NaN,
       slopeTMin: tminSlope ?? Number.NaN,
-      slopeDTR: dtrSlope,
-      slopeDTRStdErr: dtrStdErr,
+      slopeTrueDTR: trueDtrSlope ?? Number.NaN,
+      slopeTrueDTRStdErr: trueDtrStdErr,
+      slopeSeasonalAmplitude: seasonalAmpSlope,
     });
   }
 

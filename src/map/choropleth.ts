@@ -189,7 +189,7 @@ export function renderChoropleth(options: ChoroplethOptions): void {
 
 /**
  * Update the fill color of all county paths in the choropleth SVG
- * based on a selected slope type (max, mean, min, or dtr).
+ * based on a selected slope type (max, mean, min, true_dtr, or seasonal_amplitude).
  */
 export function updateMapColors(
   svgEl: SVGSVGElement,
@@ -201,10 +201,11 @@ export function updateMapColors(
   const context = svg.__choroplethContext;
   if (!context) return;
 
-  if (slopeType === "dtr") {
-    // DTR mode uses the two-channel color function.
-    const dtrDom = dataset.slopeDomains["dtr"] ?? [-1, 1];
-    const dtrColorFn = dtrColorScale(dtrDom);
+  // Diverging two-channel types (true_dtr, seasonal_amplitude).
+  if (slopeType === "true_dtr" || slopeType === "seasonal_amplitude") {
+    const colorKey = slopeType === "true_dtr" ? "true_dtr" : "seasonal_amplitude";
+    const domain = dataset.slopeDomains[colorKey] ?? [-1, 1];
+    const dtrColorFn = dtrColorScale(domain);
 
     select(svgEl)
       .selectAll<SVGPathElement, CountyFeature>(".county-path")
@@ -212,8 +213,9 @@ export function updateMapColors(
         const fips = String(d.id).padStart(5, "0");
         const county = context.countyDataMap.get(fips);
         if (!county) return "#ccc";
-        const dtrSlope = county.slopeDTR;
-        const dtrStdErr = county.slopeDTRStdErr;
+        const dtrSlope =
+          slopeType === "true_dtr" ? county.slopeTrueDTR : county.slopeSeasonalAmplitude;
+        const dtrStdErr = county.slopeTrueDTRStdErr;
         if (Number.isNaN(dtrSlope)) return "#ccc";
         return dtrColorFn(dtrSlope, 0, dtrStdErr);
       });

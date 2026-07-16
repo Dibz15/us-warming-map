@@ -1,5 +1,5 @@
 // Creates and manages a small SVG line chart overlay that displays annual
-// max/min temperature bounds plus a mean trend line for a selected county.
+// max/min temperature bounds, true DTR, and a mean trend line for a selected county.
 
 import { select } from "d3-selection";
 import { scaleLinear } from "d3-scale";
@@ -33,6 +33,7 @@ const COLORS = {
   tmax: "#d73027",
   tmin: "#0571b0",
   tmean: "#4d4d4d",
+  trueDtr: "#6a3d9b", // purple for DTR line
   background: "#fff",
   gridLine: "#e8e8e8",
   textColor: "#333",
@@ -102,7 +103,7 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
     return { label: `${prefix}${valStr}`, color };
   }
 
-  // Create a slopes container with all three trends.
+  // Create a slopes container with all trend slopes.
   const slopesDiv = overlay
     .append("div")
     .attr("class", "popup-slopes")
@@ -110,7 +111,7 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
     .style("flex-direction", "column")
     .style("gap", "3px")
     .style("margin-bottom", "8px")
-    .style("min-width", "140px"); // Ensure space for ±X.XX °F/decade labels
+    .style("min-width", "140px");
 
   // Tmax slope
   const tmaxSlope = formatSlope(county.slopeTMax, COLORS.tmax, COLORS.tmin);
@@ -139,6 +140,28 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
     .style("color", tminSlope.color)
     .text(`${tminSlope.label} °F/decade (Tmin)`);
 
+  // True DTR slope
+  const trueDtrSlope = formatSlope(county.slopeTrueDTR, COLORS.tmax, COLORS.tmin);
+  slopesDiv
+    .append("div")
+    .style("font-size", "11px")
+    .style("font-weight", "500")
+    .style("color", trueDtrSlope.color)
+    .text(`${trueDtrSlope.label} °F/decade (True DTR)`);
+
+  // Seasonal Amplitude slope
+  const seasonAmpSlope = formatSlope(
+    county.slopeSeasonalAmplitude,
+    COLORS.tmax,
+    COLORS.tmin,
+  );
+  slopesDiv
+    .append("div")
+    .style("font-size", "11px")
+    .style("font-weight", "500")
+    .style("color", seasonAmpSlope.color)
+    .text(`${seasonAmpSlope.label} °F/decade (Seasonal Amp)`);
+
   // Chart SVG
   const chartDiv = overlay
     .append("div")
@@ -161,6 +184,7 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
   const years = data.map((d) => d.year);
   const tmaxValues = data.map((d) => d.tmax ?? NaN).filter((v) => !isNaN(v));
   const tminValues = data.map((d) => d.tmin ?? NaN).filter((v) => !isNaN(v));
+  const trueDtrValues = data.map((d) => d.true_dtr ?? NaN).filter((v) => !isNaN(v));
 
   // X scale (years)
   const xMin = Math.min(...years);
@@ -169,8 +193,10 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
     .domain([xMin - 1, xMax + 1])
     .range([0, PLOT_WIDTH]);
 
-  // Y scale (temperature) — use full range from all data
-  const allTemps = [...tmaxValues, ...tminValues].filter((v) => !isNaN(v));
+  // Y scale (temperature) — use full range from all data including true DTR
+  const allTemps = [...tmaxValues, ...tminValues, ...trueDtrValues].filter(
+    (v) => !isNaN(v),
+  );
   const yMin = Math.min(...allTemps);
   const yMax = Math.max(...allTemps);
   const yPad = (yMax - yMin) * 0.15 || 1;
@@ -288,6 +314,16 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
     .attr("stroke", COLORS.tmean)
     .attr("stroke-width", 2.5);
 
+  // true_dtr line (mean(Tmax_j - Tmin_j) across 12 months)
+  g.append("path")
+    .attr("class", "true-dtr-line")
+    .attr("d", () => buildPath(data.map((d) => d.true_dtr ?? NaN)))
+    .attr("fill", "none")
+    .attr("stroke", COLORS.trueDtr)
+    .attr("stroke-width", 2)
+    .attr("stroke-dasharray", "4,2")
+    .attr("opacity", 0.8);
+
   // Legend
   const legend = overlay
     .append("div")
@@ -296,12 +332,14 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
     .style("gap", "12px")
     .style("margin-top", "6px")
     .style("font-size", "9px")
-    .style("color", COLORS.textColor);
+    .style("color", COLORS.textColor)
+    .style("flex-wrap", "wrap");
 
   const legendItems = [
     { label: "tmax (annual max)", color: COLORS.tmax },
     { label: "tmin (annual min)", color: COLORS.tmin },
     { label: "tmean (avg of tmax/tmin)", color: COLORS.tmean },
+    { label: "true DTR", color: COLORS.trueDtr },
   ];
 
   for (const item of legendItems) {
@@ -310,12 +348,14 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
       .style("display", "flex")
       .style("align-items", "center")
       .style("gap", "3px");
+    const lineStyle = item.label === "true DTR" ? "stroke-dasharray: 4,2;" : "";
     legItem
       .append("span")
       .style("display", "inline-block")
       .style("width", "12px")
       .style("height", "2px")
-      .style("background", item.color);
+      .style("background", item.color)
+      .style("style", lineStyle);
     legItem.append("span").text(item.label);
   }
 
