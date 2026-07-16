@@ -39,7 +39,8 @@ export function slopeColorScale(domain: [number, number]): (slope: number) => st
 /**
  * Create a one-dimensional diverging color scale for True Diurnal Temperature Range (DTR).
  * Values below 0 map from max purple to white; values above 0 map from white to max green.
- * The scaling is symmetric in value space: extremes of each domain edge are fully saturated.
+ * The scaling is symmetric: the extent is computed as the larger absolute value so that
+ * color saturation is consistent on both sides of zero, and white appears at value 0.
  *
  * @param dtrDomain Asymmetric domain [min, max] for this specific metric's hue channel
  */
@@ -56,13 +57,21 @@ export function dtrColorScale(dtrDomain: [number, number]): (dtrSlope: number) =
   const white = "#f7f7f7";
   const green = "#90b880";
 
-  // Left channel: min → 0 (purple → white)
+  // Compute symmetric extent: use the larger absolute value to ensure color
+  // saturation is consistent on both sides of zero.
+  const extent = Math.max(Math.abs(dtrMin), Math.abs(dtrMax));
+
+  if (extent <= 0) {
+    return () => white;
+  }
+
+  // Left channel: -extent → 0 (purple → white)
   const negativeScale = scaleLinear<string>()
     .domain([dtrMin, 0])
     .range([purple, white])
     .interpolate(interpolateRgb);
 
-  // Right channel: 0 → max (white → green)
+  // Right channel: 0 → extent (white → green)
   const positiveScale = scaleLinear<string>()
     .domain([0, dtrMax])
     .range([white, green])
@@ -81,6 +90,8 @@ export function dtrColorScale(dtrDomain: [number, number]): (dtrSlope: number) =
  * Values below 0 map from max purple to white; values above 0 map from white to max green.
  * Uses the same Purple-White-Green palette as True DTR so both metrics share the same
  * visual language (negative = cooling/narrowing; positive = warming/widening).
+ * The scaling is symmetric: the extent is computed as the larger absolute value so that
+ * color saturation is consistent on both sides of zero, and white appears at value 0.
  *
  * @param ampDomain Asymmetric domain [min, max] for this specific metric's hue channel
  */
@@ -97,13 +108,21 @@ export function ampColorScale(ampDomain: [number, number]): (ampSlope: number) =
   const white = "#f7f7f7";
   const green = "#90b880";
 
-  // Left channel: min → 0 (purple → white)
+  // Compute symmetric extent: use the larger absolute value to ensure color
+  // saturation is consistent on both sides of zero.
+  const extent = Math.max(Math.abs(ampMin), Math.abs(ampMax));
+
+  if (extent <= 0) {
+    return () => white;
+  }
+
+  // Left channel: -extent → 0 (purple → white)
   const negativeScale = scaleLinear<string>()
     .domain([ampMin, 0])
     .range([purple, white])
     .interpolate(interpolateRgb);
 
-  // Right channel: 0 → max (white → green)
+  // Right channel: 0 → extent (white → green)
   const positiveScale = scaleLinear<string>()
     .domain([0, ampMax])
     .range([white, green])

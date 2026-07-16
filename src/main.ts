@@ -170,6 +170,9 @@ async function main(): Promise<void> {
 
   /**
    * Populate a linear gradient legend with domain-specific values.
+   * The sampling is split at zero: the left 50% samples from min to 0,
+   * and the right 50% samples from 0 to max. This ensures white (no trend)
+   * appears at the visual center of the legend bar regardless of domain asymmetry.
    */
   function populateLinearLegend(
     legendEl: HTMLElement,
@@ -190,14 +193,15 @@ async function main(): Promise<void> {
     rightLabel.textContent = max.toFixed(4);
 
     // Build the gradient using the appropriate color scale.
-    const steps = 20;
+    // Split at zero: left 50% samples from min→0, right 50% samples from 0→max.
+    const stepsPerSide = 10;
     const fragment = document.createDocumentFragment();
 
-    for (let i = 0; i < steps; i++) {
-      const t = i / (steps - 1);
-      const value = min + t * (max - min);
+    // Left side: min → 0 (negative values)
+    for (let i = 0; i < stepsPerSide; i++) {
+      const t = i / (stepsPerSide - 1);
+      const value = min + t * (0 - min);
 
-      // Determine the appropriate color scale based on which legend this is.
       let color: string;
       if (legendEl.id === "dtr-legend") {
         const colorFn = dtrColorScale(domain);
@@ -209,7 +213,28 @@ async function main(): Promise<void> {
 
       const swatch = document.createElement("div");
       swatch.className = "linear-legend-swatch";
-      swatch.style.width = `${100 / steps}%`;
+      swatch.style.width = `${50 / stepsPerSide}%`;
+      swatch.style.backgroundColor = color;
+      fragment.appendChild(swatch);
+    }
+
+    // Right side: 0 → max (positive values)
+    for (let i = 0; i < stepsPerSide; i++) {
+      const t = i / (stepsPerSide - 1);
+      const value = 0 + t * (max - 0);
+
+      let color: string;
+      if (legendEl.id === "dtr-legend") {
+        const colorFn = dtrColorScale(domain);
+        color = colorFn(value);
+      } else {
+        const colorFn = ampColorScale(domain);
+        color = colorFn(value);
+      }
+
+      const swatch = document.createElement("div");
+      swatch.className = "linear-legend-swatch";
+      swatch.style.width = `${50 / stepsPerSide}%`;
       swatch.style.backgroundColor = color;
       fragment.appendChild(swatch);
     }
