@@ -120,7 +120,7 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
     .style("font-size", "11px")
     .style("font-weight", "500")
     .style("color", tmaxSlope.color)
-    .text(`${tmaxSlope.label} °F/decade (Tmax)`);
+    .text(`Max: ${tmaxSlope.label} °F/decade`);
 
   // Tmean slope
   const tmeanSlope = formatSlope(county.slopeTMean, COLORS.tmax, COLORS.tmin);
@@ -129,7 +129,7 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
     .style("font-size", "11px")
     .style("font-weight", "500")
     .style("color", tmeanSlope.color)
-    .text(`${tmeanSlope.label} °F/decade (Tmean)`);
+    .text(`Avg: ${tmeanSlope.label} °F/decade`);
 
   // Tmin slope
   const tminSlope = formatSlope(county.slopeTMin, COLORS.tmax, COLORS.tmin);
@@ -138,7 +138,7 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
     .style("font-size", "11px")
     .style("font-weight", "500")
     .style("color", tminSlope.color)
-    .text(`${tminSlope.label} °F/decade (Tmin)`);
+    .text(`Min: ${tminSlope.label} °F/decade`);
 
   // True DTR slope
   const trueDtrSlope = formatSlope(county.slopeTrueDTR, COLORS.tmax, COLORS.tmin);
@@ -147,7 +147,7 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
     .style("font-size", "11px")
     .style("font-weight", "500")
     .style("color", trueDtrSlope.color)
-    .text(`${trueDtrSlope.label} °F/decade (True DTR)`);
+    .text(`DTR: ${trueDtrSlope.label} °F/decade`);
 
   // Seasonal Amplitude slope
   const seasonAmpSlope = formatSlope(
@@ -160,7 +160,7 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
     .style("font-size", "11px")
     .style("font-weight", "500")
     .style("color", seasonAmpSlope.color)
-    .text(`${seasonAmpSlope.label} °F/decade (Seasonal Amp)`);
+    .text(`Seasonal change: ${seasonAmpSlope.label} °F/decade`);
 
   // Chart SVG
   const chartDiv = overlay
@@ -326,6 +326,7 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
 
   // Legend
   const legend = overlay
+    .append("div")
     .append("div")
     .attr("class", "popup-legend")
     .style("display", "flex")

@@ -80,19 +80,19 @@ async function main(): Promise<void> {
      <div class="slope-selector-title">Color by slope:</div>
      <div class="slope-option">
        <input type="radio" name="slope-type" id="slope-tmax" value="tmax">
-       <label for="slope-tmax">Max Temp (Tmax)</label>
+       <label for="slope-tmax">Max Temp</label>
      </div>
      <div class="slope-option">
        <input type="radio" name="slope-type" id="slope-tmean" value="tmean" checked>
-       <label for="slope-tmean">Avg Temp (Tmean)</label>
+       <label for="slope-tmean">Avg Temp</label>
      </div>
      <div class="slope-option">
        <input type="radio" name="slope-type" id="slope-tmin" value="tmin">
-       <label for="slope-tmin">Min Temp (Tmin)</label>
+       <label for="slope-tmin">Min Temp</label>
      </div>
         <div class="slope-option">
           <input type="radio" name="slope-type" id="slope-true_dtr" value="true_dtr">
-          <label for="slope-true_dtr">True Diurnal Temp Range (DTR)</label>
+          <label for="slope-true_dtr">Diurnal Temp Range (DTR)</label>
         </div>
         <div class="slope-option">
           <input type="radio" name="slope-type" id="slope-seasonal_amp" value="seasonal_amplitude">
@@ -287,7 +287,7 @@ async function main(): Promise<void> {
       updateSlopeType(target.value as SlopeType);
     }
   });
-
+  updateSlopeType("tmean");
   // Render the choropleth.
   renderChoropleth({
     container: mapContainer,
