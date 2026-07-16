@@ -141,6 +141,10 @@ async function main(): Promise<void> {
 
   /**
    * Create a minimal grid-legend DOM structure.
+   * The layout is a 4-row, 3-column grid:
+   *   Row 1: X-axis top label (spans all columns)
+   *   Row 2-4: Y-axis left-label | swatch grid | Y-axis right-label
+   *   Row 5: X-axis bottom label (spans all columns)
    */
   function createGridLegend(id: string, title: string): HTMLElement {
     const el = document.createElement("div");
@@ -156,7 +160,7 @@ async function main(): Promise<void> {
         <span class="grid-legend-y-label-right"></span>
         <span class="grid-legend-x-label-bottom"></span>
         <span class="grid-legend-footnote">
-          <span class="grid-legend-swatch-gray"></span> Not statistically significant (|DTR| < 2× SE)
+          <span class="grid-legend-swatch-gray"></span> Not statistically significant (&#x7C;DTR&#x7C; < 2× SE)
         </span>
       </div>
     `;
@@ -166,6 +170,7 @@ async function main(): Promise<void> {
   /**
    * Generic 2D grid legend populator.
    * Fills the swatches, Y-axis labels, and X-axis labels based on the given slope type.
+   * Each metric uses its own independent domain scaling.
    */
   function populateGridLegend(
     legendEl: HTMLElement,
@@ -173,8 +178,6 @@ async function main(): Promise<void> {
     slopeType: "true_dtr" | "seasonal_amplitude",
   ): void {
     const domain = data.slopeDomains[slopeType] ?? [-5, 5];
-    const colorFn = dtrColorScale(domain);
-
     const labels = SLOPE_TYPE_LABELS[slopeType];
     const swatchesContainer = legendEl.querySelector<HTMLDivElement>(".grid-swatches");
     if (!swatchesContainer) return;
@@ -182,40 +185,40 @@ async function main(): Promise<void> {
     // Clear any previous swatches.
     swatchesContainer.innerHTML = "";
 
-    // Axis labels.
+    // X-axis labels (left and right ends of the horizontal spectrum).
     const xTop = legendEl.querySelector<HTMLElement>(".grid-legend-x-label-top");
     const xBottom = legendEl.querySelector<HTMLElement>(".grid-legend-x-label-bottom");
     if (xTop) xTop.textContent = labels.xTop;
     if (xBottom) xBottom.textContent = labels.xBottom;
 
-    // Y-axis labels: "Low Magnitude" (top) ↔ "High Magnitude" (bottom).
+    // Y-axis labels: "Low" at top, "High" at bottom of the vertical intensity axis.
     const yLeft = legendEl.querySelector<HTMLElement>(".grid-legend-y-label-left");
     const yRight = legendEl.querySelector<HTMLElement>(".grid-legend-y-label-right");
     if (yLeft) yLeft.textContent = "Low";
     if (yRight) yRight.textContent = "High";
 
-    // Compute the larger absolute extent for scaling.
-    const dtrMin = domain[0];
-    const dtrMax = domain[1];
-    const dtrExtent = Math.max(Math.abs(dtrMin), Math.abs(dtrMax));
+    // Magnitude levels per row: top=low, middle=mid, bottom=high.
+    const MAGNITUDE_LEVELS = [0.33, 0.67, 1];
 
-    // Magnitude levels (rows): top=high (1.0), middle=mid (0.67), bottom=low (0.33).
-    const magnitudeLevelsRowFactor = [1, 0.67, 0.33];
-
-    for (let row = 0; row < 3; row++) {
-      const magLevel = magnitudeLevelsRowFactor[row];
+    for (const magLevel of MAGNITUDE_LEVELS) {
       for (let col = 0; col < 7; col++) {
-        // Hue level: -1 (left) → +1 (right).
+        // Hue level: -1 (left/purple) → +1 (right/amber).
         const hueLevel = (col / 6) * 2 - 1;
 
-        // Map hue level to the actual domain extent.
-        const dtrSlope = hueLevel * dtrExtent;
-        // Magnitude is always a positive factor of the domain extent.
-        const dtrMag = magLevel * dtrExtent;
+        // Compute the actual slope value for this domain.
+        const dtrExtentNeg = Math.abs(domain[0]);
+        const dtrExtentPos = domain[1];
+        const clampedHue =
+          hueLevel <= 0
+            ? Math.max(-dtrExtentNeg, hueLevel * dtrExtentNeg)
+            : Math.min(dtrExtentPos, hueLevel * dtrExtentPos);
 
-        // Use a tiny fake standard error so the color scale treats it as "significant".
-        const fakeStdErr = Math.abs(dtrSlope) * 0.01;
-        const color = colorFn(dtrSlope, dtrMag, fakeStdErr);
+        // Use the metric's own independent domain extent for this color scale.
+        const fakeStdErr = Math.abs(clampedHue) * 0.01;
+
+        // Call the color function with the explicit magnitude override (not meanSlope).
+        const colorFn = dtrColorScale(domain, magLevel);
+        const color = colorFn(clampedHue, 0, fakeStdErr);
 
         const swatch = document.createElement("div");
         swatch.style.width = "16px";

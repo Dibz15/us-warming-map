@@ -45,7 +45,7 @@ export function slopeColorScale(domain: [number, number]): (slope: number) => st
  *   Negative dtrSlope (nights leading, DTR narrowing) → purple
  *   Positive dtrSlope (days leading, DTR widening)     → amber/orange
  *
- * Magnitude channel: |dtrSlope| controls saturation/lightness.
+ * Magnitude channel: controlled by either |dtrSlope| or an optional magnitudeOverride.
  *   Near-zero DTR (no diurnal divergence) → pale neutral gray
  *   Strong DTR                            → full-saturation hue
  *
@@ -60,6 +60,7 @@ export function slopeColorScale(domain: [number, number]): (slope: number) => st
  */
 export function dtrColorScale(
   dtrDomain: [number, number],
+  magnitudeOverride?: number,
 ): (dtrSlope: number, _meanSlope: number, dtrStdErr: number) => string {
   // PuOr diverging palette — purple (narrowing) ↔ amber/orange (widening)
   const hueColors = [
@@ -101,10 +102,12 @@ export function dtrColorScale(
     // Clamp DTR to domain
     const clampedDtr = Math.max(dtrMin, Math.min(dtrMax, dtrSlope));
 
-    // Magnitude factor: clamp |dtrSlope| / maxDtrMagnitude to [0, 1]
-    // This ensures strong DTR signals (whether positive or negative) get full saturation
-    // regardless of what the mean trend does.
-    const magT = Math.min(1, Math.abs(clampedDtr) / maxDtrMagnitude);
+    // Magnitude factor: use override if provided, otherwise derive from |clampedDtr|.
+    // This allows legends and other UI elements to explicitly control saturation levels.
+    const magT =
+      magnitudeOverride != null
+        ? Math.max(0, Math.min(1, magnitudeOverride))
+        : Math.min(1, Math.abs(clampedDtr) / maxDtrMagnitude);
 
     // Significance check: not distinguishable from zero DTR
     const isSignificant = true; //Math.abs(dtrSlope) >= 2 * dtrStdErr;

@@ -220,7 +220,7 @@ body {
   padding: 14px 16px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
   font-size: 11px;
-  max-width: 340px;
+  max-width: 360px;
 }
 
 .grid-legend-title {
@@ -230,43 +230,49 @@ body {
   text-align: center;
 }
 
-/* Main layout wrapper: X-label-left | Swatch Grid | X-label-right */
+/* Main layout wrapper: X-label-top | Swatch Grid (with Y-labels) | X-label-bottom */
 .grid-legend-wrapper {
   display: grid;
-  /* Row 1: X-axis labels, Row 2: body (Y-label + swatches + Y-label) */
+  /* Column 1: Left Y-label, Column 2: Swatches, Column 3: Right Y-label */
   grid-template-columns: auto 1fr auto;
-  grid-template-rows: auto 1fr;
-  align-items: center;
+  /* Rows: (1) Top X-label, (2) Swatch Row 1 + Y-labels, (3) Swatch Row 2 + Y-labels,
+     (4) Swatch Row 3 + Y-labels, (5) Bottom X-label, (6) Footnote */
+  grid-template-rows: auto auto auto auto auto auto;
 }
 
-/* Top X-axis label row spans all three columns */
+/* Top X-axis label (spans all columns) */
 .grid-legend-x-label-top {
   grid-column: 1 / 4;
   grid-row: 1;
   font-size: 9px;
   text-align: center;
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   opacity: 0.85;
+  font-weight: 500;
 }
 
-/* Left Y-axis label */
+/* Y-axis labels: positioned to the left/right of swatches */
 .grid-legend-y-label-left {
   grid-column: 1;
-  grid-row: 2;
+  grid-row: 2 / 5;
   writing-mode: vertical-lr;
   transform: rotate(180deg);
-  font-size: 8px;
+  font-size: 9px;
   text-orientation: mixed;
   letter-spacing: 0.3px;
   white-space: nowrap;
   text-align: center;
-  opacity: 0.75;
+  opacity: 0.8;
+  /* Center vertically relative to the entire swatch block */
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 /* Swatch grid container */
 .grid-swatches {
   grid-column: 2;
-  grid-row: 2;
+  grid-row: 2 / 5;
   display: grid;
   grid-template-columns: repeat(7, 16px);
   grid-template-rows: repeat(3, 12px);
@@ -275,36 +281,40 @@ body {
   justify-items: center;
 }
 
-/* Right Y-axis label */
+/* Y-axis label: Right side */
 .grid-legend-y-label-right {
   grid-column: 3;
-  grid-row: 2;
+  grid-row: 2 / 5;
   writing-mode: vertical-lr;
   transform: rotate(180deg);
-  font-size: 8px;
+  font-size: 9px;
   text-orientation: mixed;
   letter-spacing: 0.3px;
   white-space: nowrap;
   text-align: center;
-  opacity: 0.75;
+  opacity: 0.8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-/* Bottom X-axis label row spans all three columns */
+/* Bottom X-axis label (spans all columns) */
 .grid-legend-x-label-bottom {
   grid-column: 1 / 4;
-  grid-row: 3;
+  grid-row: 5;
   font-size: 9px;
   text-align: center;
-  margin-top: 4px;
+  margin-top: 6px;
   opacity: 0.85;
+  font-weight: 500;
 }
 
 /* Insignificance footnote */
 .grid-legend-footnote {
   grid-column: 1 / 4;
-  grid-row: 4;
-  margin-top: 8px;
-  padding-top: 6px;
+  grid-row: 6;
+  margin-top: 10px;
+  padding-top: 8px;
   border-top: 1px solid #e0e0e0;
   font-size: 9px;
   display: flex;
