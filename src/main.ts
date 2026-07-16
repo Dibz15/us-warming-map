@@ -8,6 +8,21 @@ import { showPopupChart } from "@/chart/popupChart";
 import type { CountyDataset } from "@/types";
 import type { PopupPosition } from "@/chart/popupChart";
 
+/** Labels specific to each two-channel slope type. */
+const SLOPE_TYPE_LABELS: Record<
+  "true_dtr" | "seasonal_amplitude",
+  { xTop: string; xBottom: string }
+> = {
+  true_dtr: {
+    xTop: "Nights Leading (DTR ↓)",
+    xBottom: "Days Leading (DTR ↑)",
+  },
+  seasonal_amplitude: {
+    xTop: "Narrowing Amplitude",
+    xBottom: "Widening Amplitude",
+  },
+};
+
 async function main(): Promise<void> {
   const mapContainer = document.getElementById("map-container") as HTMLElement;
   if (!mapContainer) {
@@ -86,43 +101,23 @@ async function main(): Promise<void> {
    `;
   document.body.appendChild(panel);
 
-  // Create the DTR 2D legend (hidden by default, shown only in DTR mode).
-  const dtrLegend = document.createElement("div");
-  dtrLegend.id = "dtr-legend";
-  dtrLegend.className = "dtr-legend";
-  dtrLegend.style.display = "none";
-  dtrLegend.innerHTML = `
-     <div class="dtr-legend-title">True Diurnal Temperature Range</div>
-     <div class="dtr-legend-row">
-       <span class="dtr-legend-y-label">More Overall Warming</span>
-       <div class="dtr-legend-hue-row">
-         <span class="dtr-legend-x-label-north">Nights Leading (DTR ↓)</span>
-         <div class="dtr-legend-swatches"></div>
-         <span class="dtr-legend-x-label-south">Days Leading (DTR ↑)</span>
-       </div>
-     </div>
-     <div class="dtr-legend-row">
-       <span class="dtr-legend-y-label">Less Overall Warming</span>
-       <div class="dtr-legend-hue-row-bottom">
-         <span class="dtr-legend-x-label-north"></span>
-         <div class="dtr-legend-swatches-bottom"></div>
-         <span class="dtr-legend-x-label-south"></span>
-       </div>
-     </div>
-     <div class="dtr-legend-insignificant">
-       <span class="dtr-legend-swatch-gray"></span> Not statistically significant (|DTR| < 2× SE)
-     </div>
-   `;
+  // --- Create the two grid-based legend cards (DTR & Seasonal Amplitude) ---
+  const dtrLegend = createGridLegend("dtr-legend", "True Diurnal Temperature Range");
+  const seasonalAmpLegend = createGridLegend(
+    "seasonal-amp-legend",
+    "Seasonal Amplitude Change",
+  );
   document.body.appendChild(dtrLegend);
+  document.body.appendChild(seasonalAmpLegend);
 
-  // Toggle panel visibility.
+  // --- Toggle panel visibility. ---
   let panelVisible = false;
   toggleBtn.addEventListener("click", () => {
     panelVisible = !panelVisible;
     panel.style.display = panelVisible ? "block" : "none";
   });
 
-  // Wire radio button changes to update map colors and legend.
+  // --- Wire radio button changes to update map colors and legends. ---
   const updateSlopeType = (type: SlopeType) => {
     currentSlopeType = type;
     const svgEl = document.getElementById("choropleth-svg") as SVGSVGElement | null;
@@ -130,79 +125,105 @@ async function main(): Promise<void> {
       updateMapColors(svgEl, type, dataset, slopeColorScale);
     }
 
-    // Show/hide DTR legend and populate swatches when in true_dtr mode.
-    const legendEl = document.getElementById("dtr-legend") as HTMLElement | null;
-    if (legendEl && type === "true_dtr") {
-      legendEl.style.display = "block";
-      populateDTRLegend(legendEl, dataset);
-    } else if (legendEl) {
-      legendEl.style.display = "none";
+    // Hide both legends by default.
+    dtrLegend.style.display = "none";
+    seasonalAmpLegend.style.display = "none";
+
+    // Show the appropriate 2D grid legend for two-channel types.
+    if (type === "true_dtr") {
+      dtrLegend.style.display = "block";
+      populateGridLegend(dtrLegend, dataset, "true_dtr");
+    } else if (type === "seasonal_amplitude") {
+      seasonalAmpLegend.style.display = "block";
+      populateGridLegend(seasonalAmpLegend, dataset, "seasonal_amplitude");
     }
   };
 
-  /** Populate the DTR 2D legend swatches with colors from the color scale. */
-  function populateDTRLegend(legendEl: HTMLElement, data: CountyDataset): void {
-    const dtrDom = data.slopeDomains["true_dtr"] ?? [-5, 5];
-    const colorFn = dtrColorScale(dtrDom);
+  /**
+   * Create a minimal grid-legend DOM structure.
+   */
+  function createGridLegend(id: string, title: string): HTMLElement {
+    const el = document.createElement("div");
+    el.id = id;
+    el.className = "grid-legend";
+    el.style.display = "none";
+    el.innerHTML = `
+      <div class="grid-legend-title">${title}</div>
+      <div class="grid-legend-wrapper">
+        <span class="grid-legend-x-label-top"></span>
+        <span class="grid-legend-y-label-left"></span>
+        <div class="grid-swatches"></div>
+        <span class="grid-legend-y-label-right"></span>
+        <span class="grid-legend-x-label-bottom"></span>
+        <span class="grid-legend-footnote">
+          <span class="grid-legend-swatch-gray"></span> Not statistically significant (|DTR| < 2× SE)
+        </span>
+      </div>
+    `;
+    return el;
+  }
 
-    const swatchesContainer =
-      legendEl.querySelector<HTMLDivElement>(".dtr-legend-swatches");
-    const swatchesBottomContainer = legendEl.querySelector<HTMLDivElement>(
-      ".dtr-legend-swatches-bottom",
-    );
-    if (!swatchesContainer || !swatchesBottomContainer) return;
+  /**
+   * Generic 2D grid legend populator.
+   * Fills the swatches, Y-axis labels, and X-axis labels based on the given slope type.
+   */
+  function populateGridLegend(
+    legendEl: HTMLElement,
+    data: CountyDataset,
+    slopeType: "true_dtr" | "seasonal_amplitude",
+  ): void {
+    const domain = data.slopeDomains[slopeType] ?? [-5, 5];
+    const colorFn = dtrColorScale(domain);
 
-    // Clear existing swatches.
+    const labels = SLOPE_TYPE_LABELS[slopeType];
+    const swatchesContainer = legendEl.querySelector<HTMLDivElement>(".grid-swatches");
+    if (!swatchesContainer) return;
+
+    // Clear any previous swatches.
     swatchesContainer.innerHTML = "";
-    swatchesBottomContainer.innerHTML = "";
 
-    const hueLabels = ["Nights ↓", "", "Even", "", "Days ↑", "", ""];
-    // Magnitude levels relative to the DTR domain extent (now the magnitude reference).
-    const magnitudeLevels = [0, 0.33, 0.67, 1];
+    // Axis labels.
+    const xTop = legendEl.querySelector<HTMLElement>(".grid-legend-x-label-top");
+    const xBottom = legendEl.querySelector<HTMLElement>(".grid-legend-x-label-bottom");
+    if (xTop) xTop.textContent = labels.xTop;
+    if (xBottom) xBottom.textContent = labels.xBottom;
+
+    // Y-axis labels: "Low Magnitude" (top) ↔ "High Magnitude" (bottom).
+    const yLeft = legendEl.querySelector<HTMLElement>(".grid-legend-y-label-left");
+    const yRight = legendEl.querySelector<HTMLElement>(".grid-legend-y-label-right");
+    if (yLeft) yLeft.textContent = "Low";
+    if (yRight) yRight.textContent = "High";
 
     // Compute the larger absolute extent for scaling.
-    const dtrMin = dtrDom[0];
-    const dtrMax = dtrDom[1];
+    const dtrMin = domain[0];
+    const dtrMax = domain[1];
     const dtrExtent = Math.max(Math.abs(dtrMin), Math.abs(dtrMax));
 
+    // Magnitude levels (rows): top=high (1.0), middle=mid (0.67), bottom=low (0.33).
+    const magnitudeLevelsRowFactor = [1, 0.67, 0.33];
+
     for (let row = 0; row < 3; row++) {
-      const magLevel = magnitudeLevels[row + 1] ?? 0.5;
+      const magLevel = magnitudeLevelsRowFactor[row];
       for (let col = 0; col < 7; col++) {
-        const hueLevel = (col / 6) * 2 - 1; // -1 to +1
+        // Hue level: -1 (left) → +1 (right).
+        const hueLevel = (col / 6) * 2 - 1;
+
+        // Map hue level to the actual domain extent.
         const dtrSlope = hueLevel * dtrExtent;
-        // Use DTR magnitude as the magnitude factor now.
+        // Magnitude is always a positive factor of the domain extent.
         const dtrMag = magLevel * dtrExtent;
-        // Use a small standard error for the "significant" legend examples.
-        const fakeStdErr = Math.abs(dtrSlope) * 0.05;
+
+        // Use a tiny fake standard error so the color scale treats it as "significant".
+        const fakeStdErr = Math.abs(dtrSlope) * 0.01;
         const color = colorFn(dtrSlope, dtrMag, fakeStdErr);
 
         const swatch = document.createElement("div");
+        swatch.style.width = "16px";
+        swatch.style.height = "12px";
         swatch.style.backgroundColor = color;
-        swatch.style.border = "1px solid rgba(0,0,0,0.1)";
+        swatch.style.border = "1px solid rgba(0,0,0,0.08)";
         swatch.style.borderRadius = "1px";
-
-        if (row < 2) {
-          swatchesContainer.appendChild(swatch);
-        } else {
-          swatchesBottomContainer.appendChild(swatch);
-        }
-      }
-    }
-
-    // Add labels to the hue row.
-    const hueRow = legendEl.querySelector<HTMLDivElement>(".dtr-legend-hue-row");
-    if (hueRow) {
-      const existingLabels = hueRow.querySelectorAll(".dtr-hue-label");
-      existingLabels.forEach((l) => l.remove());
-
-      for (let i = 0; i < 7; i++) {
-        const label = document.createElement("span");
-        label.className = "dtr-hue-label";
-        label.style.fontSize = "8px";
-        label.style.textAlign = "center";
-        label.style.flex = "1";
-        label.textContent = hueLabels[i] ?? "";
-        hueRow.appendChild(label);
+        swatchesContainer.appendChild(swatch);
       }
     }
   }

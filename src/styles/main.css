@@ -204,8 +204,11 @@ body {
   user-select: none;
 }
 
-/* DTR 2D legend */
-.dtr-legend {
+/* ==========================================================================
+   Grid Legend (Reusable for True DTR and Seasonal Amplitude)
+   ========================================================================== */
+
+.grid-legend {
   position: fixed;
   bottom: 16px;
   left: 16px;
@@ -213,74 +216,113 @@ body {
   background: var(--color-bg);
   color: var(--color-text);
   border: 1px solid #ccc;
-  border-radius: 6px;
-  padding: 12px 14px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  padding: 14px 16px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
   font-size: 11px;
-  max-width: 320px;
+  max-width: 340px;
 }
 
-.dtr-legend-title {
+.grid-legend-title {
   font-weight: 600;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   font-size: 12px;
-}
-
-.dtr-legend-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  margin-bottom: 4px;
-}
-
-.dtr-legend-y-label {
-  writing-mode: vertical-lr;
-  transform: rotate(180deg);
-  font-size: 9px;
-  text-orientation: mixed;
-  letter-spacing: 0.3px;
-  white-space: nowrap;
-  width: 14px;
   text-align: center;
 }
 
-.dtr-legend-hue-row,
-.dtr-legend-hue-row-bottom {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-}
-
-.dtr-legend-x-label-north,
-.dtr-legend-x-label-south {
-  font-size: 9px;
-  text-align: center;
-  white-space: nowrap;
-  min-width: 50px;
-}
-
-.dtr-legend-swatches,
-.dtr-legend-swatches-bottom {
+/* Main layout wrapper: X-label-left | Swatch Grid | X-label-right */
+.grid-legend-wrapper {
   display: grid;
-  grid-template-columns: repeat(7, 16px);
-  grid-template-rows: repeat(3, 12px);
-  gap: 1px;
+  /* Row 1: X-axis labels, Row 2: body (Y-label + swatches + Y-label) */
+  grid-template-columns: auto 1fr auto;
+  grid-template-rows: auto 1fr;
+  align-items: center;
 }
 
-.dtr-legend-insignificant {
-  margin-top: 8px;
-  font-size: 10px;
-  display: flex;
-  align-items: center;
-  gap: 4px;
+/* Top X-axis label row spans all three columns */
+.grid-legend-x-label-top {
+  grid-column: 1 / 4;
+  grid-row: 1;
+  font-size: 9px;
+  text-align: center;
+  margin-bottom: 4px;
   opacity: 0.85;
 }
 
-.dtr-legend-swatch-gray {
+/* Left Y-axis label */
+.grid-legend-y-label-left {
+  grid-column: 1;
+  grid-row: 2;
+  writing-mode: vertical-lr;
+  transform: rotate(180deg);
+  font-size: 8px;
+  text-orientation: mixed;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  text-align: center;
+  opacity: 0.75;
+}
+
+/* Swatch grid container */
+.grid-swatches {
+  grid-column: 2;
+  grid-row: 2;
+  display: grid;
+  grid-template-columns: repeat(7, 16px);
+  grid-template-rows: repeat(3, 12px);
+  gap: 1.5px;
+  align-items: center;
+  justify-items: center;
+}
+
+/* Right Y-axis label */
+.grid-legend-y-label-right {
+  grid-column: 3;
+  grid-row: 2;
+  writing-mode: vertical-lr;
+  transform: rotate(180deg);
+  font-size: 8px;
+  text-orientation: mixed;
+  letter-spacing: 0.3px;
+  white-space: nowrap;
+  text-align: center;
+  opacity: 0.75;
+}
+
+/* Bottom X-axis label row spans all three columns */
+.grid-legend-x-label-bottom {
+  grid-column: 1 / 4;
+  grid-row: 3;
+  font-size: 9px;
+  text-align: center;
+  margin-top: 4px;
+  opacity: 0.85;
+}
+
+/* Insignificance footnote */
+.grid-legend-footnote {
+  grid-column: 1 / 4;
+  grid-row: 4;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px solid #e0e0e0;
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  opacity: 0.8;
+}
+
+.grid-legend-swatch-gray {
   display: inline-block;
   width: 14px;
   height: 12px;
   background: #e0e0e0;
   border: 1px solid #bbb;
   border-radius: 2px;
+  flex-shrink: 0;
 }
+
+/* ==========================================================================
+   Seasonal Amplitude Grid Legend (reuses .grid-legend class)
+   ========================================================================== */
