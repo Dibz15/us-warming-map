@@ -16,6 +16,13 @@ const DTR_INTERPRETATION =
 const AMP_INTERPRETATION =
   "Positive: Summer warming faster than winter<br>Negative: Winter warming faster than summer";
 
+/** Labels for temperature slope interpretation in legends. */
+const TEMP_SLOPE_INTERPRETATION = "Positive: Warming trend<br>Negative: Cooling trend";
+const TMAX_SLOPE_INTERPRETATION =
+  "Positive: Warming summers<br>Negative: Cooling summers<br>Note: Some areas show summer cooling. Even so, mean<br>max temperature is increasing everywhere despite<br>summer cooling, due to increased winter warming.";
+const TMIN_SLOPE_INTERPRETATION =
+  "Positive: Warming winters<br>Negative: Cooling winters";
+
 async function main(): Promise<void> {
   const mapContainer = document.getElementById("map-container") as HTMLElement;
   if (!mapContainer) {
@@ -94,7 +101,7 @@ async function main(): Promise<void> {
    `;
   document.body.appendChild(panel);
 
-  // --- Create the two linear legend cards (DTR & Seasonal Amplitude) ---
+  // --- Create the linear legend cards (DTR, Seasonal Amplitude, Tmax, Tmean, Tmin) ---
   const dtrLegend = createLinearLegend(
     "dtr-legend",
     "True Diurnal Temperature Range",
@@ -105,8 +112,26 @@ async function main(): Promise<void> {
     "Seasonal Amplitude Change",
     AMP_INTERPRETATION,
   );
+  const tmaxLegend = createLinearLegend(
+    "tmax-legend",
+    "Max Temperature (Tmax) Slope",
+    TMAX_SLOPE_INTERPRETATION,
+  );
+  const tmeanLegend = createLinearLegend(
+    "tmean-legend",
+    "Mean Temperature (Tmean) Slope",
+    TEMP_SLOPE_INTERPRETATION,
+  );
+  const tminLegend = createLinearLegend(
+    "tmin-legend",
+    "Min Temperature (Tmin) Slope",
+    TMIN_SLOPE_INTERPRETATION,
+  );
   document.body.appendChild(dtrLegend);
   document.body.appendChild(seasonalAmpLegend);
+  document.body.appendChild(tmaxLegend);
+  document.body.appendChild(tmeanLegend);
+  document.body.appendChild(tminLegend);
 
   // --- Toggle panel visibility. ---
   let panelVisible = false;
@@ -123,20 +148,48 @@ async function main(): Promise<void> {
       updateMapColors(svgEl, type, dataset, slopeColorScale);
     }
 
-    // Hide both legends by default.
+    // Hide all legends by default.
     dtrLegend.style.display = "none";
     seasonalAmpLegend.style.display = "none";
+    tmaxLegend.style.display = "none";
+    tmeanLegend.style.display = "none";
+    tminLegend.style.display = "none";
 
-    // Show the appropriate linear legend for diverging types.
+    // Show the appropriate linear legend for the selected slope type.
     if (type === "true_dtr") {
       dtrLegend.style.display = "block";
-      populateLinearLegend(dtrLegend, dataset.slopeDomains["true_dtr"] ?? [-1, 1], "DTR");
+      populateLinearLegend(
+        dtrLegend,
+        dataset.slopeDomains["true_dtr"] ?? [-1, 1],
+        dtrColorScale,
+      );
     } else if (type === "seasonal_amplitude") {
       seasonalAmpLegend.style.display = "block";
       populateLinearLegend(
         seasonalAmpLegend,
         dataset.slopeDomains["seasonal_amplitude"] ?? [-1, 1],
-        "Amplitude",
+        ampColorScale,
+      );
+    } else if (type === "tmax" || type === "tmean" || type === "tmin") {
+      let legendEl: HTMLElement;
+      let slopeKey: string;
+
+      if (type === "tmax") {
+        legendEl = tmaxLegend;
+        slopeKey = "tmax";
+      } else if (type === "tmean") {
+        legendEl = tmeanLegend;
+        slopeKey = "tmean";
+      } else {
+        legendEl = tminLegend;
+        slopeKey = "tmin";
+      }
+
+      legendEl.style.display = "block";
+      populateLinearLegend(
+        legendEl,
+        dataset.slopeDomains[slopeKey] ?? [-1, 1],
+        slopeColorScale,
       );
     }
   };
@@ -177,7 +230,7 @@ async function main(): Promise<void> {
   function populateLinearLegend(
     legendEl: HTMLElement,
     domain: [number, number],
-    _unitLabel: string,
+    colorScaleFn: (domain: [number, number]) => (value: number) => string,
   ): void {
     const [min, max] = domain;
     const gradientContainer = legendEl.querySelector<HTMLDivElement>(
@@ -192,7 +245,7 @@ async function main(): Promise<void> {
     leftLabel.textContent = min.toFixed(4);
     rightLabel.textContent = max.toFixed(4);
 
-    // Build the gradient using the appropriate color scale.
+    // Build the gradient using the provided color scale.
     // Split at zero: left 50% samples from min→0, right 50% samples from 0→max.
     const stepsPerSide = 10;
     const fragment = document.createDocumentFragment();
@@ -201,15 +254,7 @@ async function main(): Promise<void> {
     for (let i = 0; i < stepsPerSide; i++) {
       const t = i / (stepsPerSide - 1);
       const value = min + t * (0 - min);
-
-      let color: string;
-      if (legendEl.id === "dtr-legend") {
-        const colorFn = dtrColorScale(domain);
-        color = colorFn(value);
-      } else {
-        const colorFn = ampColorScale(domain);
-        color = colorFn(value);
-      }
+      const color = colorScaleFn(domain)(value);
 
       const swatch = document.createElement("div");
       swatch.className = "linear-legend-swatch";
@@ -222,15 +267,7 @@ async function main(): Promise<void> {
     for (let i = 0; i < stepsPerSide; i++) {
       const t = i / (stepsPerSide - 1);
       const value = 0 + t * (max - 0);
-
-      let color: string;
-      if (legendEl.id === "dtr-legend") {
-        const colorFn = dtrColorScale(domain);
-        color = colorFn(value);
-      } else {
-        const colorFn = ampColorScale(domain);
-        color = colorFn(value);
-      }
+      const color = colorScaleFn(domain)(value);
 
       const swatch = document.createElement("div");
       swatch.className = "linear-legend-swatch";
