@@ -2,26 +2,19 @@
 // and wire county hover/tap events to show the popup temperature chart.
 
 import { loadCountyClimate, loadCountyGeometry, SlopeType } from "@/data/loadCountyData";
-import { slopeColorScale, dtrColorScale } from "@/map/colorScale";
+import { slopeColorScale, dtrColorScale, ampColorScale } from "@/map/colorScale";
 import { renderChoropleth, updateMapColors } from "@/map/choropleth";
 import { showPopupChart } from "@/chart/popupChart";
 import type { CountyDataset } from "@/types";
 import type { PopupPosition } from "@/chart/popupChart";
 
-/** Labels specific to each two-channel slope type. */
-const SLOPE_TYPE_LABELS: Record<
-  "true_dtr" | "seasonal_amplitude",
-  { xTop: string; xBottom: string }
-> = {
-  true_dtr: {
-    xTop: "Nights Leading (DTR ↓)",
-    xBottom: "Days Leading (DTR ↑)",
-  },
-  seasonal_amplitude: {
-    xTop: "Narrowing Amplitude",
-    xBottom: "Widening Amplitude",
-  },
-};
+/** Labels for DTR interpretation in legends. */
+const DTR_INTERPRETATION =
+  "Positive: Daytime warming faster than nighttime<br>Negative: Nighttime warming faster than daytime";
+
+/** Labels for Seasonal Amplitude interpretation in legends. */
+const AMP_INTERPRETATION =
+  "Positive: Summer warming faster than winter<br>Negative: Winter warming faster than summer";
 
 async function main(): Promise<void> {
   const mapContainer = document.getElementById("map-container") as HTMLElement;
@@ -101,11 +94,16 @@ async function main(): Promise<void> {
    `;
   document.body.appendChild(panel);
 
-  // --- Create the two grid-based legend cards (DTR & Seasonal Amplitude) ---
-  const dtrLegend = createGridLegend("dtr-legend", "True Diurnal Temperature Range");
-  const seasonalAmpLegend = createGridLegend(
+  // --- Create the two linear legend cards (DTR & Seasonal Amplitude) ---
+  const dtrLegend = createLinearLegend(
+    "dtr-legend",
+    "True Diurnal Temperature Range",
+    DTR_INTERPRETATION,
+  );
+  const seasonalAmpLegend = createLinearLegend(
     "seasonal-amp-legend",
     "Seasonal Amplitude Change",
+    AMP_INTERPRETATION,
   );
   document.body.appendChild(dtrLegend);
   document.body.appendChild(seasonalAmpLegend);
@@ -129,111 +127,96 @@ async function main(): Promise<void> {
     dtrLegend.style.display = "none";
     seasonalAmpLegend.style.display = "none";
 
-    // Show the appropriate 2D grid legend for two-channel types.
+    // Show the appropriate linear legend for diverging types.
     if (type === "true_dtr") {
       dtrLegend.style.display = "block";
-      populateGridLegend(dtrLegend, dataset, "true_dtr");
+      populateLinearLegend(dtrLegend, dataset.slopeDomains["true_dtr"] ?? [-1, 1], "DTR");
     } else if (type === "seasonal_amplitude") {
       seasonalAmpLegend.style.display = "block";
-      populateGridLegend(seasonalAmpLegend, dataset, "seasonal_amplitude");
+      populateLinearLegend(
+        seasonalAmpLegend,
+        dataset.slopeDomains["seasonal_amplitude"] ?? [-1, 1],
+        "Amplitude",
+      );
     }
   };
 
   /**
-   * Create a minimal grid-legend DOM structure.
-   * The layout is a "Compass" style grid:
-   *   Row 1: Y-axis top label ("Low")
-   *   Row 2: Swatch row 1
-   *   Row 3: Swatch row 2
-   *   Row 4: Swatch row 3 + Y-axis bottom label ("High")
-   *   Row 5: X-axis labels (left="Nights", center="", right="Days")
+   * Create a linear gradient legend DOM structure.
+   * The layout is a horizontal gradient bar with domain labels on each side,
+   * a title above, and an interpretation note below.
    */
-  function createGridLegend(id: string, title: string): HTMLElement {
+  function createLinearLegend(
+    id: string,
+    title: string,
+    interpretation: string,
+  ): HTMLElement {
     const el = document.createElement("div");
     el.id = id;
-    el.className = "grid-legend";
+    el.className = "linear-legend";
     el.style.display = "none";
     el.innerHTML = `
-      <div class="grid-legend-title">${title}</div>
-      <div class="grid-legend-wrapper">
-        <div class="grid-legend-compass">
-          <span class="grid-legend-y-label-top"></span>
-          <div class="grid-swatches"></div>
-          <span class="grid-legend-y-label-bottom"></span>
-          <span class="grid-legend-x-label-left"></span>
-          <span></span>
-          <span class="grid-legend-x-label-right"></span>
-        </div>
-        <span class="grid-legend-footnote">
-          <span class="grid-legend-swatch-gray"></span> Not statistically significant (&#x7C;DTR&#x7C; < 2× SE)
-        </span>
+      <div class="linear-legend-title">${title}</div>
+      <div class="linear-legend-gradient"></div>
+      <div class="linear-legend-labels">
+        <span class="linear-legend-left"></span>
+        <span class="linear-legend-center">0</span>
+        <span class="linear-legend-right"></span>
       </div>
+      <div class="linear-legend-interpretation">${interpretation}</div>
     `;
     return el;
   }
 
   /**
-   * Generic 2D grid legend populator.
-   * Fills the swatches, Y-axis labels, and X-axis labels based on the given slope type.
-   * Each metric uses its own independent domain scaling.
+   * Populate a linear gradient legend with domain-specific values.
    */
-  function populateGridLegend(
+  function populateLinearLegend(
     legendEl: HTMLElement,
-    data: CountyDataset,
-    slopeType: "true_dtr" | "seasonal_amplitude",
+    domain: [number, number],
+    _unitLabel: string,
   ): void {
-    const domain = data.slopeDomains[slopeType] ?? [-5, 5];
-    const labels = SLOPE_TYPE_LABELS[slopeType];
-    const swatchesContainer = legendEl.querySelector<HTMLDivElement>(".grid-swatches");
-    if (!swatchesContainer) return;
+    const [min, max] = domain;
+    const gradientContainer = legendEl.querySelector<HTMLDivElement>(
+      ".linear-legend-gradient",
+    );
+    const leftLabel = legendEl.querySelector<HTMLElement>(".linear-legend-left");
+    const rightLabel = legendEl.querySelector<HTMLElement>(".linear-legend-right");
 
-    // Clear any previous swatches.
-    swatchesContainer.innerHTML = "";
+    if (!gradientContainer || !leftLabel || !rightLabel) return;
 
-    // X-axis labels (left and right ends of the horizontal spectrum).
-    const xLeft = legendEl.querySelector<HTMLElement>(".grid-legend-x-label-left");
-    const xRight = legendEl.querySelector<HTMLElement>(".grid-legend-x-label-right");
-    if (xLeft) xLeft.textContent = labels.xTop;
-    if (xRight) xRight.textContent = labels.xBottom;
+    // Set domain labels.
+    leftLabel.textContent = min.toFixed(4);
+    rightLabel.textContent = max.toFixed(4);
 
-    // Y-axis labels: "Low" at top, "High" at bottom of the vertical intensity axis.
-    const yTop = legendEl.querySelector<HTMLElement>(".grid-legend-y-label-top");
-    const yBottom = legendEl.querySelector<HTMLElement>(".grid-legend-y-label-bottom");
-    if (yTop) yTop.textContent = "Low";
-    if (yBottom) yBottom.textContent = "High";
+    // Build the gradient using the appropriate color scale.
+    const steps = 20;
+    const fragment = document.createDocumentFragment();
 
-    // Magnitude levels per row: top=low, middle=mid, bottom=high.
-    const MAGNITUDE_LEVELS = [0.33, 0.67, 1];
+    for (let i = 0; i < steps; i++) {
+      const t = i / (steps - 1);
+      const value = min + t * (max - min);
 
-    for (const magLevel of MAGNITUDE_LEVELS) {
-      for (let col = 0; col < 7; col++) {
-        // Hue level: -1 (left/purple) → +1 (right/amber).
-        const hueLevel = (col / 6) * 2 - 1;
-
-        // Compute the actual slope value for this domain.
-        const dtrExtentNeg = Math.abs(domain[0]);
-        const dtrExtentPos = domain[1];
-        const clampedHue =
-          hueLevel <= 0
-            ? Math.max(-dtrExtentNeg, hueLevel * dtrExtentNeg)
-            : Math.min(dtrExtentPos, hueLevel * dtrExtentPos);
-
-        // Use the metric's own independent domain extent for this color scale.
-        const fakeStdErr = Math.abs(clampedHue) * 0.01;
-
-        // Call the color function with the explicit magnitude override (not meanSlope).
-        const colorFn = dtrColorScale(domain, magLevel);
-        const color = colorFn(clampedHue, 0, fakeStdErr);
-
-        const swatch = document.createElement("div");
-        swatch.style.width = "16px";
-        swatch.style.height = "12px";
-        swatch.style.backgroundColor = color;
-        swatch.style.border = "1px solid rgba(0,0,0,0.08)";
-        swatch.style.borderRadius = "1px";
-        swatchesContainer.appendChild(swatch);
+      // Determine the appropriate color scale based on which legend this is.
+      let color: string;
+      if (legendEl.id === "dtr-legend") {
+        const colorFn = dtrColorScale(domain);
+        color = colorFn(value);
+      } else {
+        const colorFn = ampColorScale(domain);
+        color = colorFn(value);
       }
+
+      const swatch = document.createElement("div");
+      swatch.className = "linear-legend-swatch";
+      swatch.style.width = `${100 / steps}%`;
+      swatch.style.backgroundColor = color;
+      fragment.appendChild(swatch);
     }
+
+    // Clear and add new swatches.
+    gradientContainer.innerHTML = "";
+    gradientContainer.appendChild(fragment);
   }
 
   panel.addEventListener("change", (e: Event) => {

@@ -7,7 +7,7 @@ import { geoPath, geoAlbersUsa } from "d3-geo";
 import { select } from "d3-selection";
 import type { CountyDataset, CountyTrend } from "@/types";
 import type { slopeColorScale } from "./colorScale";
-import { dtrColorScale } from "./colorScale";
+import { dtrColorScale, ampColorScale } from "./colorScale";
 import type { SlopeType } from "@/data/loadCountyData";
 
 // Extend SVGSVGElement to hold our runtime context reference.
@@ -201,11 +201,14 @@ export function updateMapColors(
   const context = svg.__choroplethContext;
   if (!context) return;
 
-  // Diverging two-channel types (true_dtr, seasonal_amplitude).
+  // Diverging one-dimensional types (true_dtr, seasonal_amplitude).
   if (slopeType === "true_dtr" || slopeType === "seasonal_amplitude") {
     const colorKey = slopeType === "true_dtr" ? "true_dtr" : "seasonal_amplitude";
     const domain = dataset.slopeDomains[colorKey] ?? [-1, 1];
-    const dtrColorFn = dtrColorScale(domain);
+
+    // Choose the appropriate scale function.
+    const colorFn =
+      slopeType === "true_dtr" ? dtrColorScale(domain) : ampColorScale(domain);
 
     select(svgEl)
       .selectAll<SVGPathElement, CountyFeature>(".county-path")
@@ -213,11 +216,10 @@ export function updateMapColors(
         const fips = String(d.id).padStart(5, "0");
         const county = context.countyDataMap.get(fips);
         if (!county) return "#ccc";
-        const dtrSlope =
+        const slope =
           slopeType === "true_dtr" ? county.slopeTrueDTR : county.slopeSeasonalAmplitude;
-        const dtrStdErr = county.slopeTrueDTRStdErr;
-        if (Number.isNaN(dtrSlope)) return "#ccc";
-        return dtrColorFn(dtrSlope, 0, dtrStdErr);
+        if (Number.isNaN(slope)) return "#ccc";
+        return colorFn(slope);
       });
     return;
   }

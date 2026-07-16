@@ -37,135 +37,83 @@ export function slopeColorScale(domain: [number, number]): (slope: number) => st
 }
 
 /**
- * Create a two-channel DTR color function with its own independent domain.
- * Each metric type should get its own separate `dtrColorScale` call so that the
- * internal magnitude calculations don't cross-contaminate between metrics.
+ * Create a one-dimensional diverging color scale for True Diurnal Temperature Range (DTR).
+ * Values below 0 map from max purple to white; values above 0 map from white to max green.
+ * The scaling is symmetric in value space: extremes of each domain edge are fully saturated.
  *
- * @param dtrDomain Asymmetric domain for this specific metric's hue channel
- * @param magLevels Optional array of saturation levels per row [top, middle, bottom]
+ * @param dtrDomain Asymmetric domain [min, max] for this specific metric's hue channel
  */
-export function dtrColorScale(
-  dtrDomain: [number, number],
-  magnitudeOverride?: number,
-): (dtrSlope: number, _meanSlope: number, dtrStdErr: number) => string {
-  // PuOr diverging palette — purple (narrowing) ↔ amber/orange (widening)
-  const hueColors = [
-    "#5e4fa2", // deep purple (negative)
-    "#7b3291",
-    "#c2a5cf",
-    "#f7f7f7", // neutral gray/white (zero)
-    "#d6dba0",
-    "#dfc27a",
-    "#fc8d59", // amber/orange (positive)
-  ];
-
+export function dtrColorScale(dtrDomain: [number, number]): (dtrSlope: number) => string {
   const dtrMin = dtrDomain[0];
   const dtrMax = dtrDomain[1];
 
-  if (dtrMax <= dtrMin) {
-    return () => "#e0e0e0"; // pale neutral gray
+  if (dtrMax <= dtrMin || !Number.isFinite(dtrMin) || !Number.isFinite(dtrMax)) {
+    return () => "#f7f7f7";
   }
 
-  const dtrExtentNeg = Math.abs(dtrMin);
-  const dtrExtentPos = dtrMax;
+  // Purple for negative values, white at zero, green for positive values
+  const purple = "#5e4fa2";
+  const white = "#f7f7f7";
+  const green = "#90b880";
 
-  // Diverging hue scale from purple to amber via PuOr-inspired colors
-  const hueScale = scaleLinear<string>()
-    .domain([dtrMin, dtrMin * 0.5, 0, dtrMax * 0.5, dtrMax])
-    .range(hueColors)
+  // Left channel: min → 0 (purple → white)
+  const negativeScale = scaleLinear<string>()
+    .domain([dtrMin, 0])
+    .range([purple, white])
     .interpolate(interpolateRgb);
 
-  // Neutral pale gray base for low-magnitude DTR counties
-  const neutralGray = "#e8e8e8";
+  // Right channel: 0 → max (white → green)
+  const positiveScale = scaleLinear<string>()
+    .domain([0, dtrMax])
+    .range([white, green])
+    .interpolate(interpolateRgb);
 
-  // Maximum |DTR| for magnitude blending (use the larger extent)
-  const maxDtrMagnitude = Math.max(dtrExtentNeg, dtrExtentPos);
-
-  // Keep meanSlope in the signature for API compatibility with callers, but
-  // prefix with _ so TypeScript knows it's intentionally unused.
-  return (dtrSlope: number, _meanSlope: number, dtrStdErr: number): string => {
-    // Clamp DTR to domain
-    const clampedDtr = Math.max(dtrMin, Math.min(dtrMax, dtrSlope));
-
-    // Magnitude factor: use override if provided, otherwise derive from |clampedDtr|.
-    const magT =
-      magnitudeOverride != null
-        ? Math.max(0, Math.min(1, magnitudeOverride))
-        : Math.min(1, Math.abs(clampedDtr) / maxDtrMagnitude);
-
-    // Significance check: not distinguishable from zero DTR
-    const isSignificant = true; //Math.abs(dtrSlope) >= 2 * dtrStdErr;
-
-    if (!isSignificant || !Number.isFinite(dtrSlope) || !Number.isFinite(dtrStdErr)) {
-      return interpolateRgb(neutralGray, "#bdbdbd")(magT);
-    }
-
-    // Get the full saturation hue color
-    const baseColor = hueScale(clampedDtr);
-
-    // Blend from neutral gray toward full-saturation hue based on magnitude
-    return interpolateRgb(neutralGray, baseColor)(magT);
+  return (dtrSlope: number): string => {
+    const clamped = Math.max(dtrMin, Math.min(dtrMax, dtrSlope));
+    if (!Number.isFinite(clamped)) return white;
+    if (clamped <= 0) return negativeScale(clamped);
+    return positiveScale(clamped);
   };
 }
 
 /**
- * Create a separate DTR color function specifically for Seasonal Amplitude.
- * Uses a distinct amplitude-specific palette (Teal-Olive) to visually distinguish
- * it from True DTR (Purple-Amber), preventing the two metrics from looking identical.
+ * Create a one-dimensional diverging color scale for Seasonal Amplitude.
+ * Values below 0 map from max purple to white; values above 0 map from white to max green.
+ * Uses the same Purple-White-Green palette as True DTR so both metrics share the same
+ * visual language (negative = cooling/narrowing; positive = warming/widening).
  *
- * @param ampDomain Domain for seasonal amplitude hue channel
- * @param magLevels Optional array of saturation levels per row [top, middle, bottom]
+ * @param ampDomain Asymmetric domain [min, max] for this specific metric's hue channel
  */
-export function ampColorScale(
-  ampDomain: [number, number],
-  magnitudeOverride?: number,
-): (ampSlope: number, _meanSlope: number, stdErr: number) => string {
-  // Teal-Olive diverging palette — blue-green (narrowing) ↔ olive-brown (widening)
-  const ampColors = [
-    "#2c7fb8", // deep blue-green (negative)
-    "#41b6c4",
-    "#a1dab4",
-    "#f7f7f7", // neutral gray/white (zero)
-    "#ecc850",
-    "#d9af8a",
-    "#ca1834", // deep red-brown (positive)
-  ];
-
+export function ampColorScale(ampDomain: [number, number]): (ampSlope: number) => string {
   const ampMin = ampDomain[0];
   const ampMax = ampDomain[1];
 
-  if (ampMax <= ampMin) {
-    return () => "#e0e0e0";
+  if (ampMax <= ampMin || !Number.isFinite(ampMin) || !Number.isFinite(ampMax)) {
+    return () => "#f7f7f7";
   }
 
-  const ampExtentNeg = Math.abs(ampMin);
-  const ampExtentPos = ampMax;
+  // Purple for negative values, white at zero, green for positive values
+  const purple = "#5e4fa2";
+  const white = "#f7f7f7";
+  const green = "#90b880";
 
-  // Diverging hue scale from blue-green to red-brown via Teal-Olive-inspired colors
-  const ampHueScale = scaleLinear<string>()
-    .domain([ampMin, ampMin * 0.5, 0, ampMax * 0.5, ampMax])
-    .range(ampColors)
+  // Left channel: min → 0 (purple → white)
+  const negativeScale = scaleLinear<string>()
+    .domain([ampMin, 0])
+    .range([purple, white])
     .interpolate(interpolateRgb);
 
-  const neutralGray = "#e8e8e8";
-  const maxAmpMagnitude = Math.max(ampExtentNeg, ampExtentPos);
+  // Right channel: 0 → max (white → green)
+  const positiveScale = scaleLinear<string>()
+    .domain([0, ampMax])
+    .range([white, green])
+    .interpolate(interpolateRgb);
 
-  return (ampSlope: number, _meanSlope: number, stdErr: number): string => {
-    const clampedAmp = Math.max(ampMin, Math.min(ampMax, ampSlope));
-
-    const magT =
-      magnitudeOverride != null
-        ? Math.max(0, Math.min(1, magnitudeOverride))
-        : Math.min(1, Math.abs(clampedAmp) / maxAmpMagnitude);
-
-    const isSignificant = true;
-
-    if (!isSignificant || !Number.isFinite(ampSlope) || !Number.isFinite(stdErr)) {
-      return interpolateRgb(neutralGray, "#bdbdbd")(magT);
-    }
-
-    const baseColor = ampHueScale(clampedAmp);
-    return interpolateRgb(neutralGray, baseColor)(magT);
+  return (ampSlope: number): string => {
+    const clamped = Math.max(ampMin, Math.min(ampMax, ampSlope));
+    if (!Number.isFinite(clamped)) return white;
+    if (clamped <= 0) return negativeScale(clamped);
+    return positiveScale(clamped);
   };
 }
 
