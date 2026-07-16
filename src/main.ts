@@ -141,10 +141,12 @@ async function main(): Promise<void> {
 
   /**
    * Create a minimal grid-legend DOM structure.
-   * The layout is a 4-row, 3-column grid:
-   *   Row 1: X-axis top label (spans all columns)
-   *   Row 2-4: Y-axis left-label | swatch grid | Y-axis right-label
-   *   Row 5: X-axis bottom label (spans all columns)
+   * The layout is a "Compass" style grid:
+   *   Row 1: Y-axis top label ("Low")
+   *   Row 2: Swatch row 1
+   *   Row 3: Swatch row 2
+   *   Row 4: Swatch row 3 + Y-axis bottom label ("High")
+   *   Row 5: X-axis labels (left="Nights", center="", right="Days")
    */
   function createGridLegend(id: string, title: string): HTMLElement {
     const el = document.createElement("div");
@@ -154,11 +156,14 @@ async function main(): Promise<void> {
     el.innerHTML = `
       <div class="grid-legend-title">${title}</div>
       <div class="grid-legend-wrapper">
-        <span class="grid-legend-x-label-top"></span>
-        <span class="grid-legend-y-label-left"></span>
-        <div class="grid-swatches"></div>
-        <span class="grid-legend-y-label-right"></span>
-        <span class="grid-legend-x-label-bottom"></span>
+        <div class="grid-legend-compass">
+          <span class="grid-legend-y-label-top"></span>
+          <div class="grid-swatches"></div>
+          <span class="grid-legend-y-label-bottom"></span>
+          <span class="grid-legend-x-label-left"></span>
+          <span></span>
+          <span class="grid-legend-x-label-right"></span>
+        </div>
         <span class="grid-legend-footnote">
           <span class="grid-legend-swatch-gray"></span> Not statistically significant (&#x7C;DTR&#x7C; < 2× SE)
         </span>
@@ -186,16 +191,16 @@ async function main(): Promise<void> {
     swatchesContainer.innerHTML = "";
 
     // X-axis labels (left and right ends of the horizontal spectrum).
-    const xTop = legendEl.querySelector<HTMLElement>(".grid-legend-x-label-top");
-    const xBottom = legendEl.querySelector<HTMLElement>(".grid-legend-x-label-bottom");
-    if (xTop) xTop.textContent = labels.xTop;
-    if (xBottom) xBottom.textContent = labels.xBottom;
+    const xLeft = legendEl.querySelector<HTMLElement>(".grid-legend-x-label-left");
+    const xRight = legendEl.querySelector<HTMLElement>(".grid-legend-x-label-right");
+    if (xLeft) xLeft.textContent = labels.xTop;
+    if (xRight) xRight.textContent = labels.xBottom;
 
     // Y-axis labels: "Low" at top, "High" at bottom of the vertical intensity axis.
-    const yLeft = legendEl.querySelector<HTMLElement>(".grid-legend-y-label-left");
-    const yRight = legendEl.querySelector<HTMLElement>(".grid-legend-y-label-right");
-    if (yLeft) yLeft.textContent = "Low";
-    if (yRight) yRight.textContent = "High";
+    const yTop = legendEl.querySelector<HTMLElement>(".grid-legend-y-label-top");
+    const yBottom = legendEl.querySelector<HTMLElement>(".grid-legend-y-label-bottom");
+    if (yTop) yTop.textContent = "Low";
+    if (yBottom) yBottom.textContent = "High";
 
     // Magnitude levels per row: top=low, middle=mid, bottom=high.
     const MAGNITUDE_LEVELS = [0.33, 0.67, 1];

@@ -20,3 +20,4 @@ implemented")` and the "Not implemented yet" comment, but keep the rest of
   3. Never combine a network connection command with pipe-based filtering in a single
      command invocation.
   4. If all else fails (command keeps timing out, for example) prompt the user to run the required command and feed the output back to your chat.
+- When writing a plan in "plan mode", keep in mind that the model used in "act mode" is less capable and should be given more explicit plan instructions.

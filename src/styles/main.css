@@ -230,48 +230,53 @@ body {
   text-align: center;
 }
 
-/* Main layout wrapper: X-label-top | Swatch Grid (with Y-labels) | X-label-bottom */
+/* Outer wrapper: holds the main compass + footnote */
 .grid-legend-wrapper {
-  display: grid;
-  /* Column 1: Left Y-label, Column 2: Swatches, Column 3: Right Y-label */
-  grid-template-columns: auto 1fr auto;
-  /* Rows: (1) Top X-label, (2) Swatch Row 1 + Y-labels, (3) Swatch Row 2 + Y-labels,
-     (4) Swatch Row 3 + Y-labels, (5) Bottom X-label, (6) Footnote */
-  grid-template-rows: auto auto auto auto auto auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
 }
 
-/* Top X-axis label (spans all columns) */
-.grid-legend-x-label-top {
-  grid-column: 1 / 4;
+/* Compass grid container: a 3x3 grid that places labels at the extremities
+   of the swatch block, creating a clear "Compass" or "Axis" layout.
+   Grid Layout (3 rows x 4 columns):
+     Row 1: [y-top] [       ] [swatches span] [y-bottom]  <-- actually wrong for vertical labels
+     Better approach: Y-axis as a single column to the LEFT, swatches in the middle, X-axis below.
+*/
+
+.grid-legend-compass {
+  display: grid;
+  /* Columns: Y-label | Swatch Area | X-Left | X-Center | X-Right */
+  /* Wait, swatches are 7x3. Let's do a 5-row layout for Y-axis placement. */
+  grid-template-columns: auto 1fr auto auto auto;
+  grid-template-rows: auto auto auto auto auto;
+  align-items: center;
+  justify-items: center;
+}
+
+/* Y-axis top label ("Low") positioned above the swatch block */
+.grid-legend-y-label-top {
+  grid-column: 2;
   grid-row: 1;
   font-size: 9px;
   text-align: center;
-  margin-bottom: 6px;
   opacity: 0.85;
-  font-weight: 500;
+  font-weight: 600;
 }
 
-/* Y-axis labels: positioned to the left/right of swatches */
-.grid-legend-y-label-left {
-  grid-column: 1;
-  grid-row: 2 / 5;
-  writing-mode: vertical-lr;
-  transform: rotate(180deg);
-  font-size: 9px;
-  text-orientation: mixed;
-  letter-spacing: 0.3px;
-  white-space: nowrap;
-  text-align: center;
-  opacity: 0.8;
-  /* Center vertically relative to the entire swatch block */
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* Swatch grid container */
-.grid-swatches {
+/* Y-axis bottom label ("High") positioned below the swatch block */
+.grid-legend-y-label-bottom {
   grid-column: 2;
+  grid-row: 5;
+  font-size: 9px;
+  text-align: center;
+  opacity: 0.85;
+  font-weight: 600;
+}
+
+/* Swatch grid container (7 columns x 3 rows) */
+.grid-swatches {
+  grid-column: 2 / 6; /* Span across the swatch area, leaving room for Y-axis if needed */
   grid-row: 2 / 5;
   display: grid;
   grid-template-columns: repeat(7, 16px);
@@ -281,41 +286,28 @@ body {
   justify-items: center;
 }
 
-/* Y-axis label: Right side */
-.grid-legend-y-label-right {
-  grid-column: 3;
-  grid-row: 2 / 5;
-  writing-mode: vertical-lr;
-  transform: rotate(180deg);
-  font-size: 9px;
-  text-orientation: mixed;
-  letter-spacing: 0.3px;
-  white-space: nowrap;
-  text-align: center;
-  opacity: 0.8;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-}
-
-/* Bottom X-axis label (spans all columns) */
-.grid-legend-x-label-bottom {
-  grid-column: 1 / 4;
+/* X-axis left label ("Nights Leading") positioned to the left/below */
+.grid-legend-x-label-left {
+  grid-column: 1;
   grid-row: 5;
   font-size: 9px;
-  text-align: center;
-  margin-top: 6px;
+  text-align: right;
+  opacity: 0.85;
+  font-weight: 500;
+}
+
+/* X-axis right label ("Days Leading") positioned to the right/below */
+.grid-legend-x-label-right {
+  grid-column: 5;
+  grid-row: 5;
+  font-size: 9px;
+  text-align: left;
   opacity: 0.85;
   font-weight: 500;
 }
 
 /* Insignificance footnote */
 .grid-legend-footnote {
-  grid-column: 1 / 4;
-  grid-row: 6;
-  margin-top: 10px;
-  padding-top: 8px;
-  border-top: 1px solid #e0e0e0;
   font-size: 9px;
   display: flex;
   align-items: center;
@@ -332,7 +324,3 @@ body {
   border-radius: 2px;
   flex-shrink: 0;
 }
-
-/* ==========================================================================
-   Seasonal Amplitude Grid Legend (reuses .grid-legend class)
-   ========================================================================== */

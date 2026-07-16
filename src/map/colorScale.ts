@@ -20,7 +20,6 @@ export function slopeColorScale(domain: [number, number]): (slope: number) => st
   const domainExtent = Math.max(absMin, absMax);
 
   if (domainExtent <= 0) {
-    // Degenerate case: return a neutral color for all slopes
     return () => "#f7f7f7";
   }
 
@@ -32,31 +31,18 @@ export function slopeColorScale(domain: [number, number]): (slope: number) => st
     .interpolate(interpolateRgb);
 
   return (slope: number) => {
-    // Clamp values to domain
     const clamped = Math.max(-domainExtent, Math.min(domainExtent, slope));
     return scale(clamped);
   };
 }
 
 /**
- * Create a two-channel DTR color function.
+ * Create a two-channel DTR color function with its own independent domain.
+ * Each metric type should get its own separate `dtrColorScale` call so that the
+ * internal magnitude calculations don't cross-contaminate between metrics.
  *
- * Hue channel: d3's PuOr diverging scheme centered at 0.
- *   Negative dtrSlope (nights leading, DTR narrowing) → purple
- *   Positive dtrSlope (days leading, DTR widening)     → amber/orange
- *
- * Magnitude channel: controlled by either |dtrSlope| or an optional magnitudeOverride.
- *   Near-zero DTR (no diurnal divergence) → pale neutral gray
- *   Strong DTR                            → full-saturation hue
- *
- * This ensures counties with opposing day/night trends that cancel in the
- * mean (e.g., tmax=+0.02, tmin=-0.02 → mean≈0) still show strong DTR colors
- * because the magnitude comes from |DTR| itself, not |meanSlope|.
- *
- * Significance masking: if |dtrSlope| < 2 * dtrSlopeStdErr,
- * render desaturated/gray to indicate statistical insignificance.
- *
- * @param dtrDomain Asymmetric domain for the DTR hue (e.g. [-2, 5])
+ * @param dtrDomain Asymmetric domain for this specific metric's hue channel
+ * @param magLevels Optional array of saturation levels per row [top, middle, bottom]
  */
 export function dtrColorScale(
   dtrDomain: [number, number],
@@ -80,7 +66,6 @@ export function dtrColorScale(
     return () => "#e0e0e0"; // pale neutral gray
   }
 
-  // Use asymmetric domain directly for accurate color mapping
   const dtrExtentNeg = Math.abs(dtrMin);
   const dtrExtentPos = dtrMax;
 
@@ -103,7 +88,6 @@ export function dtrColorScale(
     const clampedDtr = Math.max(dtrMin, Math.min(dtrMax, dtrSlope));
 
     // Magnitude factor: use override if provided, otherwise derive from |clampedDtr|.
-    // This allows legends and other UI elements to explicitly control saturation levels.
     const magT =
       magnitudeOverride != null
         ? Math.max(0, Math.min(1, magnitudeOverride))
@@ -113,7 +97,6 @@ export function dtrColorScale(
     const isSignificant = true; //Math.abs(dtrSlope) >= 2 * dtrStdErr;
 
     if (!isSignificant || !Number.isFinite(dtrSlope) || !Number.isFinite(dtrStdErr)) {
-      // Blend toward neutral gray based on magnitude (brighter for more warming)
       return interpolateRgb(neutralGray, "#bdbdbd")(magT);
     }
 
@@ -121,6 +104,67 @@ export function dtrColorScale(
     const baseColor = hueScale(clampedDtr);
 
     // Blend from neutral gray toward full-saturation hue based on magnitude
+    return interpolateRgb(neutralGray, baseColor)(magT);
+  };
+}
+
+/**
+ * Create a separate DTR color function specifically for Seasonal Amplitude.
+ * Uses a distinct amplitude-specific palette (Teal-Olive) to visually distinguish
+ * it from True DTR (Purple-Amber), preventing the two metrics from looking identical.
+ *
+ * @param ampDomain Domain for seasonal amplitude hue channel
+ * @param magLevels Optional array of saturation levels per row [top, middle, bottom]
+ */
+export function ampColorScale(
+  ampDomain: [number, number],
+  magnitudeOverride?: number,
+): (ampSlope: number, _meanSlope: number, stdErr: number) => string {
+  // Teal-Olive diverging palette — blue-green (narrowing) ↔ olive-brown (widening)
+  const ampColors = [
+    "#2c7fb8", // deep blue-green (negative)
+    "#41b6c4",
+    "#a1dab4",
+    "#f7f7f7", // neutral gray/white (zero)
+    "#ecc850",
+    "#d9af8a",
+    "#ca1834", // deep red-brown (positive)
+  ];
+
+  const ampMin = ampDomain[0];
+  const ampMax = ampDomain[1];
+
+  if (ampMax <= ampMin) {
+    return () => "#e0e0e0";
+  }
+
+  const ampExtentNeg = Math.abs(ampMin);
+  const ampExtentPos = ampMax;
+
+  // Diverging hue scale from blue-green to red-brown via Teal-Olive-inspired colors
+  const ampHueScale = scaleLinear<string>()
+    .domain([ampMin, ampMin * 0.5, 0, ampMax * 0.5, ampMax])
+    .range(ampColors)
+    .interpolate(interpolateRgb);
+
+  const neutralGray = "#e8e8e8";
+  const maxAmpMagnitude = Math.max(ampExtentNeg, ampExtentPos);
+
+  return (ampSlope: number, _meanSlope: number, stdErr: number): string => {
+    const clampedAmp = Math.max(ampMin, Math.min(ampMax, ampSlope));
+
+    const magT =
+      magnitudeOverride != null
+        ? Math.max(0, Math.min(1, magnitudeOverride))
+        : Math.min(1, Math.abs(clampedAmp) / maxAmpMagnitude);
+
+    const isSignificant = true;
+
+    if (!isSignificant || !Number.isFinite(ampSlope) || !Number.isFinite(stdErr)) {
+      return interpolateRgb(neutralGray, "#bdbdbd")(magT);
+    }
+
+    const baseColor = ampHueScale(clampedAmp);
     return interpolateRgb(neutralGray, baseColor)(magT);
   };
 }
