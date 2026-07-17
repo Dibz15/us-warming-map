@@ -386,3 +386,97 @@ body {
   text-align: center;
   white-space: pre-line;
 }
+
+/* ==========================================================================
+   Period Delta UI (Method selector, year picker, DTR disabled tooltip)
+   ========================================================================== */
+
+/* Section dividers inside the settings panel. */
+.pd-section {
+  margin-bottom: 12px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #e0e0e0;
+}
+
+.pd-section:last-of-type {
+  border-bottom: none;
+  margin-bottom: 0;
+  padding-bottom: 0;
+}
+
+/* Year picker layout. */
+.pd-year-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.pd-year-group {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+
+.pd-year-group label {
+  min-width: 90px;
+  text-align: right;
+  color: var(--color-text);
+}
+
+.pd-year-group input[type="number"] {
+  width: 72px;
+  padding: 3px 6px;
+  border: 1px solid #ccc;
+  border-radius: 3px;
+  font-size: 12px;
+}
+
+/* Window size row styling. */
+.pd-window-size {
+  margin-top: 4px;
+  padding-top: 6px;
+  border-top: 1px dashed #e0e0e0;
+}
+
+/* Validation error text. */
+.pd-year-error {
+  color: #c62828;
+  font-size: 11px;
+  min-height: 1em;
+  margin-top: 4px;
+}
+
+/* Tooltip icon next to disabled DTR metric option. */
+.metric-tooltip {
+  display: inline-block;
+  margin-left: 4px;
+  font-size: 12px;
+  cursor: help;
+  color: #888;
+  user-select: none;
+}
+
+/* Disabled metric row styling. */
+.slope-option.disabled-metric {
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+/* ==========================================================================
+   Loading state for period delta computation.
+   ========================================================================== */
+
+.period-delta-loading {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  background: rgba(255, 255, 255, 0.9);
+  padding: 8px 16px;
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  font-size: 13px;
+  color: var(--color-text);
+  pointer-events: none;
+}
