@@ -2,11 +2,18 @@
 // colored by src/map/colorScale.ts, with hover/tap handlers that hand off
 // to src/chart/popupChart.ts.
 
+// d3-transition must be imported to augment d3-selection's Selection interface
+// with the `.transition()` method via TypeScript module augmentation.
+import "d3-transition";
+
 import { feature } from "topojson-client";
 import { geoPath, geoAlbersUsa } from "d3-geo";
 import { select } from "d3-selection";
-import type { CountyDataset } from "@/types";
+import { zoom, zoomIdentity } from "d3-zoom";
+import type { CountyDataset, CountyTrend } from "@/types";
 import type { slopeColorScale } from "./colorScale";
+import { dtrColorScale, ampColorScale } from "./colorScale";
+import type { SlopeType } from "@/data/loadCountyData";
 
 // Extend SVGSVGElement to hold our runtime context reference.
 interface ExtendedSVGElement extends SVGSVGElement {
@@ -42,7 +49,7 @@ export function renderChoropleth(options: ChoroplethOptions): void {
   select(container).selectAll("*").remove();
 
   // Create SVG container
-  const svg = select(container)
+  const svgEl = select(container)
     .append("svg")
     .attr("id", "choropleth-svg")
     .attr("width", "100%")
@@ -51,8 +58,30 @@ export function renderChoropleth(options: ChoroplethOptions): void {
     .attr("preserveAspectRatio", "xMidYMid meet")
     .node() as unknown as ExtendedSVGElement;
 
-  const g = svg ? select(svg).append("g").attr("id", "counties-group") : null;
-  if (!svg || !g) return;
+  const g = svgEl ? select(svgEl).append("g").attr("id", "counties-group") : null;
+  if (!svgEl || !g) return;
+
+  // Apply initial transform to center the map.
+  g.attr("transform", "");
+
+  // Add zoom/pan support for mobile and desktop.
+  const zoomBehavior = zoom<SVGSVGElement, unknown>()
+    .scaleExtent([1, 8])
+    .on("zoom", (event: { transform: { toString: () => string } }) => {
+      g.attr("transform", event.transform.toString());
+    });
+
+  select(svgEl).call(zoomBehavior);
+
+  // Double-click to reset zoom.
+  select(svgEl)
+    .style("pointer-events", "all")
+    .on("dblclick.zoom", (_event: MouseEvent) => {
+      select<SVGSVGElement, unknown>(svgEl)
+        .transition()
+        .duration(750)
+        .call(zoomBehavior.transform, zoomIdentity);
+    });
 
   // Create projection and path generator
   const projection = geoAlbersUsa().scale(1100).translate([480, 300]);
@@ -118,7 +147,7 @@ export function renderChoropleth(options: ChoroplethOptions): void {
       const fips = String(d.id).padStart(5, "0");
       const county = countyDataMap.get(fips);
       if (!county) return "#ccc"; // Missing data
-      return colorScale(county.slopeFPerDecade);
+      return colorScale(county.slopeTMean);
     })
     .attr("stroke", "#fff")
     .attr("stroke-width", 0.5)
@@ -182,5 +211,73 @@ export function renderChoropleth(options: ChoroplethOptions): void {
     });
 
   // Store references on the SVG for later updates (e.g., re-coloring after popup closes)
-  svg.__choroplethContext = { countyDataMap, colorScale };
+  svgEl.__choroplethContext = { countyDataMap, colorScale };
+}
+
+/**
+ * Update the fill color of all county paths in the choropleth SVG
+ * based on a selected slope type (max, mean, min, true_dtr, or seasonal_amplitude).
+ */
+export function updateMapColors(
+  svgEl: SVGSVGElement,
+  slopeType: SlopeType,
+  dataset: CountyDataset,
+  colorScaleFn: typeof slopeColorScale,
+): void {
+  const svg = svgEl as unknown as ExtendedSVGElement;
+  const context = svg.__choroplethContext;
+  if (!context) return;
+
+  // Diverging one-dimensional types (true_dtr, seasonal_amplitude).
+  if (slopeType === "true_dtr" || slopeType === "seasonal_amplitude") {
+    const colorKey = slopeType === "true_dtr" ? "true_dtr" : "seasonal_amplitude";
+    const domain = dataset.slopeDomains[colorKey] ?? [-1, 1];
+
+    // Choose the appropriate scale function.
+    const colorFn =
+      slopeType === "true_dtr" ? dtrColorScale(domain) : ampColorScale(domain);
+
+    select(svgEl)
+      .selectAll<SVGPathElement, CountyFeature>(".county-path")
+      .attr("fill", (d) => {
+        const fips = String(d.id).padStart(5, "0");
+        const county = context.countyDataMap.get(fips);
+        if (!county) return "#ccc";
+        const slope =
+          slopeType === "true_dtr" ? county.slopeTrueDTR : county.slopeSeasonalAmplitude;
+        if (Number.isNaN(slope)) return "#ccc";
+        return colorFn(slope);
+      });
+    return;
+  }
+
+  // Get the appropriate domain for this slope type.
+  const domain = dataset.slopeDomains[slopeType] ?? [-1, 1];
+
+  // Build a new color scale for this domain.
+  const scaledColorScale = colorScaleFn(domain);
+
+  // Map of slope type to the corresponding CountyTrend field name.
+  const SLOPE_FIELD: Record<
+    string,
+    keyof Pick<CountyTrend, "slopeTMax" | "slopeTMean" | "slopeTMin">
+  > = {
+    tmax: "slopeTMax",
+    tmean: "slopeTMean",
+    tmin: "slopeTMin",
+  };
+
+  const field = SLOPE_FIELD[slopeType];
+
+  // Update fill for each county path.
+  select(svgEl)
+    .selectAll<SVGPathElement, CountyFeature>(".county-path")
+    .attr("fill", (d) => {
+      const fips = String(d.id).padStart(5, "0");
+      const county = context.countyDataMap.get(fips);
+      if (!county) return "#ccc";
+      const slope = county[field] as number;
+      if (Number.isNaN(slope)) return "#ccc";
+      return scaledColorScale(slope);
+    });
 }

@@ -142,3 +142,247 @@ body {
 #footer a:hover {
   text-decoration: underline;
 }
+
+/* Settings panel toggle button (direct child of body) */
+#settings-toggle-btn {
+  position: fixed;
+  top: 10px;
+  right: 16px;
+  z-index: 2000;
+  background: #333;
+  color: #ffffff;
+  border: 1px solid #555;
+  border-radius: 4px;
+  padding: 8px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  transition: background 0.15s;
+}
+
+#settings-toggle-btn:hover {
+  background: #555;
+}
+
+/* Temperature slope selector panel (direct child of body) */
+.slope-selector-panel {
+  position: fixed;
+  top: 48px;
+  right: 16px;
+  z-index: 2000;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  padding: 12px 14px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  font-size: 13px;
+  min-width: 170px;
+}
+
+.slope-selector-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  color: var(--color-text);
+}
+
+.slope-option {
+  display: flex;
+  align-items: center;
+  padding: 4px 0;
+  cursor: pointer;
+}
+
+.slope-option input[type="radio"] {
+  margin-right: 6px;
+  cursor: pointer;
+}
+
+.slope-option label {
+  cursor: pointer;
+  user-select: none;
+}
+
+/* ==========================================================================
+   Grid Legend (Reusable for True DTR and Seasonal Amplitude)
+   ========================================================================== */
+
+.grid-legend {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  z-index: 2000;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  padding: 14px 16px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+  font-size: 11px;
+  max-width: 360px;
+}
+
+.grid-legend-title {
+  font-weight: 600;
+  margin-bottom: 10px;
+  font-size: 12px;
+  text-align: center;
+}
+
+/* Outer wrapper: holds the main compass + footnote */
+.grid-legend-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+/* Compass grid container: a 3x3 grid that places labels at the extremities
+   of the swatch block, creating a clear "Compass" or "Axis" layout.
+   Grid Layout (3 rows x 4 columns):
+     Row 1: [y-top] [       ] [swatches span] [y-bottom]  <-- actually wrong for vertical labels
+     Better approach: Y-axis as a single column to the LEFT, swatches in the middle, X-axis below.
+*/
+
+.grid-legend-compass {
+  display: grid;
+  /* Columns: Y-label | Swatch Area | X-Left | X-Center | X-Right */
+  /* Wait, swatches are 7x3. Let's do a 5-row layout for Y-axis placement. */
+  grid-template-columns: auto 1fr auto auto auto;
+  grid-template-rows: auto auto auto auto auto;
+  align-items: center;
+  justify-items: center;
+}
+
+/* Y-axis top label ("Low") positioned above the swatch block */
+.grid-legend-y-label-top {
+  grid-column: 2;
+  grid-row: 1;
+  font-size: 9px;
+  text-align: center;
+  opacity: 0.85;
+  font-weight: 600;
+}
+
+/* Y-axis bottom label ("High") positioned below the swatch block */
+.grid-legend-y-label-bottom {
+  grid-column: 2;
+  grid-row: 5;
+  font-size: 9px;
+  text-align: center;
+  opacity: 0.85;
+  font-weight: 600;
+}
+
+/* Swatch grid container (7 columns x 3 rows) */
+.grid-swatches {
+  grid-column: 2 / 6; /* Span across the swatch area, leaving room for Y-axis if needed */
+  grid-row: 2 / 5;
+  display: grid;
+  grid-template-columns: repeat(7, 16px);
+  grid-template-rows: repeat(3, 12px);
+  gap: 1.5px;
+  align-items: center;
+  justify-items: center;
+}
+
+/* X-axis left label ("Nights Leading") positioned to the left/below */
+.grid-legend-x-label-left {
+  grid-column: 1;
+  grid-row: 5;
+  font-size: 9px;
+  text-align: right;
+  opacity: 0.85;
+  font-weight: 500;
+}
+
+/* X-axis right label ("Days Leading") positioned to the right/below */
+.grid-legend-x-label-right {
+  grid-column: 5;
+  grid-row: 5;
+  font-size: 9px;
+  text-align: left;
+  opacity: 0.85;
+  font-weight: 500;
+}
+
+/* Insignificance footnote */
+.grid-legend-footnote {
+  font-size: 9px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  opacity: 0.8;
+}
+
+.grid-legend-swatch-gray {
+  display: inline-block;
+  width: 14px;
+  height: 12px;
+  background: #e0e0e0;
+  border: 1px solid #bbb;
+  border-radius: 2px;
+  flex-shrink: 0;
+}
+
+/* ==========================================================================
+   Linear Gradient Legend (True DTR and Seasonal Amplitude)
+   ========================================================================== */
+
+.linear-legend {
+  position: fixed;
+  bottom: 16px;
+  left: 16px;
+  z-index: 2000;
+  background: var(--color-bg);
+  color: var(--color-text);
+  border: 1px solid #ccc;
+  border-radius: 8px;
+  padding: 14px 16px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.15);
+  font-size: 11px;
+  max-width: 420px;
+}
+
+.linear-legend-title {
+  font-weight: 600;
+  margin-bottom: 8px;
+  font-size: 12px;
+  text-align: center;
+}
+
+.linear-legend-gradient {
+  display: flex;
+  width: 100%;
+  height: 16px;
+  border-radius: 3px;
+  overflow: hidden;
+  margin-bottom: 4px;
+}
+
+.linear-legend-swatch {
+  height: 100%;
+  flex-shrink: 0;
+}
+
+.linear-legend-labels {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 10px;
+  opacity: 0.85;
+  font-weight: 500;
+  margin-bottom: 6px;
+}
+
+.linear-legend-center {
+  position: relative;
+}
+
+.linear-legend-interpretation {
+  font-size: 10px;
+  line-height: 1.4;
+  opacity: 0.75;
+  text-align: center;
+  white-space: pre-line;
+}

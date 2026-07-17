@@ -33,6 +33,7 @@ build into the current draft of the frontend UI map viewer.
 - Run `npm run lint` and `npm run build` before considering a task done —
   `build` includes a full `tsc --noEmit` type check.
 - Don't commit `node_modules/`, `dist/`, or `data-pipeline/raw/`.
+- Since the frontend uses Vite, the appropriate preview render command is `npm run preview`
 
 ## Data integrity
 

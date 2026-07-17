@@ -10,6 +10,7 @@ export interface CountyYearRecord {
   year: number;
   tmax: number; // annual mean of daily max temp, °F
   tmin: number; // annual mean of daily min temp, °F
+  true_dtr: number; // mean(Tmax_j - Tmin_j) across 12 months, °F
 }
 
 export interface CountyTrend {
@@ -17,9 +18,18 @@ export interface CountyTrend {
   name: string;
   state: string;
   series: CountyYearRecord[];
-  // Precomputed OLS slope of the mean((tmax+tmin)/2) series, °F/decade.
-  // This is what drives the choropleth color scale.
-  slopeFPerDecade: number;
+  // Precomputed OLS slopes, °F/decade.
+  // slopeTMax:    slope of the annual maximum temperature series
+  // slopeTMean:   slope of the annual mean (tmax+tmin)/2 series (default)
+  // slopeTMin:    slope of the annual minimum temperature series
+  // slopeTrueDTR: OLS slope of the True DTR series — mean(Tmax_j - Tmin_j) per month
+  // slopeSeasonalAmplitude: slope(tmax) - slope(tmin) — change in seasonal amplitude
+  slopeTMax: number;
+  slopeTMean: number;
+  slopeTMin: number;
+  slopeTrueDTR: number;
+  slopeTrueDTRStdErr: number;
+  slopeSeasonalAmplitude: number;
 }
 
 export interface CountyDataset {
