@@ -1,9 +1,10 @@
-// Creates and manages a small SVG line chart overlay that displays annual
-// max/min temperature bounds, true DTR, and a mean trend line for a selected county.
+// Creates and manages a small SVG line chart overlay that displays the active
+// temperature series (tmax, tmin, tmean, or true DTR) for a selected county.
 
 import { select } from "d3-selection";
 import { scaleLinear } from "d3-scale";
 import type { CountyDataset } from "@/types";
+import type { SlopeType } from "@/data/loadCountyData";
 
 // d3-axis has no TypeScript types in this package. Declare minimal interfaces.
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -20,6 +21,7 @@ export interface PopupChartOptions {
   container: HTMLElement;
   county: NonNullable<CountyDataset["counties"]>[number];
   position: PopupPosition;
+  slopeType: SlopeType;
   onClose?: () => void;
 }
 
@@ -34,15 +36,83 @@ const COLORS = {
   tmin: "#0571b0",
   tmean: "#4d4d4d",
   trueDtr: "#6a3d9b", // purple for DTR line
+  seasonAmp: "#e6ab02", // amber for seasonal amplitude
   background: "#fff",
   gridLine: "#e8e8e8",
   textColor: "#333",
 };
 
+/** Labels used in the popup legend. */
+const SERIES_LABELS: Record<SlopeType, string> = {
+  tmax: "tmax (annual max)",
+  tmin: "tmin (annual min)",
+  tmean: "tmean (avg of tmax/tmin)",
+  true_dtr: "true DTR",
+  seasonal_amplitude: "seasonal amplitude",
+};
+
 export async function showPopupChart(options: PopupChartOptions): Promise<void> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { axisBottom, axisLeft } = await import("d3-axis" as any);
-  const { container, county, position, onClose } = options;
+  const { container, county, position, slopeType, onClose } = options;
+
+  /** Map the active slope type to series values and color. */
+  function getActiveSeries(): {
+    values: number[];
+    color: string;
+    label: string;
+    dashed: boolean;
+  } {
+    switch (slopeType) {
+      case "tmax":
+        return {
+          values: county.series.map((d) => d.tmax ?? NaN),
+          color: COLORS.tmax,
+          label: SERIES_LABELS.tmax,
+          dashed: false,
+        };
+      case "tmin":
+        return {
+          values: county.series.map((d) => d.tmin ?? NaN),
+          color: COLORS.tmin,
+          label: SERIES_LABELS.tmin,
+          dashed: false,
+        };
+      case "tmean": {
+        const meanVals = county.series.map((d) => {
+          if (isNaN(d.tmax) || isNaN(d.tmin)) return NaN;
+          return (d.tmax + d.tmin) / 2;
+        });
+        return {
+          values: meanVals,
+          color: COLORS.tmean,
+          label: SERIES_LABELS.tmean,
+          dashed: false,
+        };
+      }
+      case "true_dtr":
+        return {
+          values: county.series.map((d) => d.true_dtr ?? NaN),
+          color: COLORS.trueDtr,
+          label: SERIES_LABELS.true_dtr,
+          dashed: true,
+        };
+      case "seasonal_amplitude": {
+        const ampVals = county.series.map((d) => {
+          if (isNaN(d.tmax) || isNaN(d.tmin)) return NaN;
+          return d.tmax - d.tmin;
+        });
+        return {
+          values: ampVals,
+          color: COLORS.seasonAmp,
+          label: SERIES_LABELS.seasonal_amplitude,
+          dashed: false,
+        };
+      }
+    }
+  }
+
+  const activeSeries = getActiveSeries();
 
   // Remove any existing popup
   select(container).selectAll(".popup-chart").remove();
@@ -71,7 +141,7 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
     .style("right", "8px")
     .style("border", "none")
     .style("background", "transparent")
-    .style("font-size", "18px")
+    .style("font-size", "32px")
     .style("cursor", "pointer")
     .style("color", COLORS.textColor)
     .on("click", () => {
@@ -162,12 +232,15 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
     .style("color", seasonAmpSlope.color)
     .text(`Seasonal change: ${seasonAmpSlope.label} °F/decade`);
 
-  // Chart SVG
+  // Chart SVG — container height must match CHART_HEIGHT so the SVG does not
+  // overflow and overlap the legend below. Centered with margin: auto.
   const chartDiv = overlay
     .append("div")
     .attr("class", "popup-chart-svg-container")
     .style("width", `${CHART_WIDTH}px`)
-    .style("height", `${PLOT_HEIGHT + MARGIN.top + 5}px`);
+    .style("height", `${CHART_HEIGHT - MARGIN.bottom}px`)
+    .style("margin-left", "auto")
+    .style("margin-right", "auto");
 
   const svg = chartDiv
     .append("svg")
@@ -177,14 +250,15 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
 
   const g = svg.append("g").attr("transform", `translate(${MARGIN.left},${MARGIN.top})`);
 
-  // Prepare data
+  // Prepare data for the active series
   const data = county.series;
   if (!data || data.length === 0) return;
 
   const years = data.map((d) => d.year);
-  const tmaxValues = data.map((d) => d.tmax ?? NaN).filter((v) => !isNaN(v));
-  const tminValues = data.map((d) => d.tmin ?? NaN).filter((v) => !isNaN(v));
-  const trueDtrValues = data.map((d) => d.true_dtr ?? NaN).filter((v) => !isNaN(v));
+
+  // Filter out NaN values for scale calculation
+  const validValues = activeSeries.values.filter((v) => !isNaN(v));
+  if (validValues.length === 0) return;
 
   // X scale (years)
   const xMin = Math.min(...years);
@@ -193,19 +267,16 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
     .domain([xMin - 1, xMax + 1])
     .range([0, PLOT_WIDTH]);
 
-  // Y scale (temperature) — use full range from all data including true DTR
-  const allTemps = [...tmaxValues, ...tminValues, ...trueDtrValues].filter(
-    (v) => !isNaN(v),
-  );
-  const yMin = Math.min(...allTemps);
-  const yMax = Math.max(...allTemps);
+  // Y scale — use only the active series data for proper scaling
+  const yMin = Math.min(...validValues);
+  const yMax = Math.max(...validValues);
   const yPad = (yMax - yMin) * 0.15 || 1;
 
   const yScale = scaleLinear()
     .domain([yMin - yPad, yMax + yPad])
     .range([PLOT_HEIGHT, 0]);
 
-  // Grid lines — yScale.ticks() returns number[]
+  // Grid lines
   const gridTicks = yScale.ticks(6);
   g.selectAll<SVGLineElement, number>(".grid-line")
     .data(gridTicks)
@@ -233,12 +304,53 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
     .style("font-size", "9px")
     .attr("fill", COLORS.textColor);
 
-  // Remove default axis lines
+  // Remove default axis lines and add label styling
   g.selectAll<SVGPathElement, unknown>(".x-axis path, .x-axis line")
     .style("stroke", COLORS.gridLine)
     .style("fill", "none");
 
-  // Y axis
+  // Axis labels — adjust y position to avoid overlap
+  g.append("text")
+    .attr("class", "y-axis-label")
+    .attr("transform", "rotate(-90)")
+    .attr("x", -PLOT_HEIGHT / 2)
+    .attr("y", -35)
+    .attr("text-anchor", "middle")
+    .style("font-size", "10px")
+    .style("fill", COLORS.textColor)
+    .text("°F");
+
+  // Build line path for the active series only
+  function buildActivePath(): string {
+    let path = "";
+    for (let i = 0; i < data.length; i++) {
+      const cx = xScale(data[i].year);
+      const cy = yScale(activeSeries.values[i]);
+      if (isNaN(cy)) continue;
+      path += (path === "" ? "M" : "L") + `${cx},${cy}`;
+    }
+    return path;
+  }
+
+  // Draw the active series line
+  g.append("path")
+    .attr("class", "active-series-line")
+    .attr("d", buildActivePath)
+    .attr("fill", "none")
+    .attr("stroke", activeSeries.color)
+    .attr("stroke-width", activeSeries.label === SERIES_LABELS.tmean ? 2.5 : 2)
+    .attr("opacity", 0.8)
+    .attr("stroke-dasharray", activeSeries.dashed ? "4,2" : null);
+
+  // X axis label
+  g.append("text")
+    .attr("class", "x-axis-label")
+    .attr("x", PLOT_WIDTH / 2)
+    .attr("y", PLOT_HEIGHT + 25)
+    .attr("text-anchor", "middle")
+    .style("font-size", "10px")
+    .style("fill", COLORS.textColor)
+    .text("Year");
   g.append("g")
     .attr("class", "y-axis")
     .call((axisLeft as ReturnType<AxisFn>)(yScale).ticks(6))
@@ -249,116 +361,36 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
   // Remove default axis line
   g.selectAll(".y-axis path, .y-axis line").style("stroke", COLORS.gridLine);
 
-  // Axis labels
-  g.append("text")
-    .attr("class", "x-axis-label")
-    .attr("x", PLOT_WIDTH / 2)
-    .attr("y", PLOT_HEIGHT + 25)
-    .attr("text-anchor", "middle")
-    .style("font-size", "10px")
-    .style("fill", COLORS.textColor)
-    .text("Year");
-
-  g.append("text")
-    .attr("class", "y-axis-label")
-    .attr("transform", "rotate(-90)")
-    .attr("x", -PLOT_HEIGHT / 2)
-    .attr("y", -30)
-    .attr("text-anchor", "middle")
-    .style("font-size", "10px")
-    .style("fill", COLORS.textColor)
-    .text("°F");
-
-  // Build line path strings manually to avoid d3-shape typing issues
-  function buildPath(values: number[]): string {
-    let path = "";
-    for (let i = 0; i < data.length; i++) {
-      const cx = xScale(data[i].year);
-      const cy = yScale(values[i]);
-      if (isNaN(cy)) continue;
-      path += (path === "" ? "M" : "L") + `${cx},${cy}`;
-    }
-    return path;
-  }
-
-  // tmax line
-  g.append("path")
-    .attr("class", "tmax-line")
-    .attr("d", () => buildPath(data.map((d) => d.tmax ?? NaN)))
-    .attr("fill", "none")
-    .attr("stroke", COLORS.tmax)
-    .attr("stroke-width", 1.5)
-    .attr("opacity", 0.6);
-
-  // tmin line
-  g.append("path")
-    .attr("class", "tmin-line")
-    .attr("d", () => buildPath(data.map((d) => d.tmin ?? NaN)))
-    .attr("fill", "none")
-    .attr("stroke", COLORS.tmin)
-    .attr("stroke-width", 1.5)
-    .attr("opacity", 0.6);
-
-  // tmean line (average of tmax and tmin where both are valid)
-  g.append("path")
-    .attr("class", "tmean-line")
-    .attr("d", () =>
-      buildPath(
-        data.map((d) => {
-          if (isNaN(d.tmax) || isNaN(d.tmin)) return NaN;
-          return (d.tmax + d.tmin) / 2;
-        }),
-      ),
-    )
-    .attr("fill", "none")
-    .attr("stroke", COLORS.tmean)
-    .attr("stroke-width", 2.5);
-
-  // true_dtr line (mean(Tmax_j - Tmin_j) across 12 months)
-  g.append("path")
-    .attr("class", "true-dtr-line")
-    .attr("d", () => buildPath(data.map((d) => d.true_dtr ?? NaN)))
-    .attr("fill", "none")
-    .attr("stroke", COLORS.trueDtr)
-    .attr("stroke-width", 2)
-    .attr("stroke-dasharray", "4,2")
-    .attr("opacity", 0.8);
-
-  // Legend
+  // Legend — show only the active series
   const legend = overlay
-    .append("div")
     .append("div")
     .attr("class", "popup-legend")
     .style("display", "flex")
-    .style("gap", "12px")
-    .style("margin-top", "6px")
-    .style("font-size", "9px")
-    .style("color", COLORS.textColor)
-    .style("flex-wrap", "wrap");
+    .style("align-items", "center")
+    .style("gap", "6px")
+    .style("margin-top", "24px")
+    .style("font-size", "10px")
+    .style("color", COLORS.textColor);
 
-  const legendItems = [
-    { label: "tmax (annual max)", color: COLORS.tmax },
-    { label: "tmin (annual min)", color: COLORS.tmin },
-    { label: "tmean (avg of tmax/tmin)", color: COLORS.tmean },
-    { label: "true DTR", color: COLORS.trueDtr },
-  ];
+  const legItem = legend
+    .append("span")
+    .style("display", "flex")
+    .style("align-items", "center")
+    .style("gap", "4px");
 
-  for (const item of legendItems) {
-    const legItem = legend
-      .append("span")
-      .style("display", "flex")
-      .style("align-items", "center")
-      .style("gap", "3px");
-    const lineStyle = item.label === "true DTR" ? "stroke-dasharray: 4,2;" : "";
-    legItem
-      .append("span")
-      .style("display", "inline-block")
-      .style("width", "12px")
-      .style("height", "2px")
-      .style("background", item.color)
-      .style("style", lineStyle);
-    legItem.append("span").text(item.label);
-  }
+  legItem
+    .append("span")
+    .style("display", "inline-block")
+    .style("width", "16px")
+    .style("height", activeSeries.dashed ? "0" : "3px")
+    .style("background", activeSeries.dashed ? "transparent" : activeSeries.color)
+    .style(
+      "border-bottom",
+      activeSeries.dashed ? `${2}px solid ${activeSeries.color}` : "none",
+    )
+    .style("border-radius", activeSeries.dashed ? "0" : "1px");
+
+  legItem.append("span").text(activeSeries.label);
 
   // Close on Escape key
   const handleKeyDown = (event: KeyboardEvent) => {

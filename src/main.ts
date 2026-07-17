@@ -7,6 +7,7 @@ import { renderChoropleth, updateMapColors } from "@/map/choropleth";
 import { showPopupChart } from "@/chart/popupChart";
 import type { CountyDataset } from "@/types";
 import type { PopupPosition } from "@/chart/popupChart";
+export type { SlopeType } from "@/data/loadCountyData";
 
 /** Labels for DTR interpretation in legends. */
 const DTR_INTERPRETATION =
@@ -47,17 +48,21 @@ async function main(): Promise<void> {
   // Track the currently selected county so we can clear the popup.
   let selectedCounty: NonNullable<CountyDataset["counties"]>[number] | null = null;
 
-  /** Position the popup chart to avoid viewport edges. */
+  /** Position the popup chart to center it on the map viewport. */
   function computePosition(svgEl: SVGSVGElement, w: number, h: number): PopupPosition {
     const rect = svgEl.getBoundingClientRect();
-    let x = rect.width / 2 - w / 2; // center by default
+
+    // Center the popup within the SVG container.
+    let x = rect.width / 2 - w / 2;
     let y = rect.height / 2 - h / 2;
 
-    // Clamp to viewport edges.
-    if (x < 4) x = 4;
-    if (x + w > rect.width - 4) x = rect.width - w - 4;
-    if (y < 4) y = 4;
-    if (y + h > rect.height - 4) y = rect.height - h - 4;
+    // Clamp to viewport edges to keep the popup fully visible.
+    if (x < 8) x = 8;
+    if (x + w > rect.width - 8) x = rect.width - w - 8;
+    if (y < 8) y = 8;
+    if (y + h > rect.height - 8) y = rect.height - h - 8;
+
+    // Keep the centered position unless clamping forces an offset.
     return { x, y };
   }
 
@@ -306,8 +311,17 @@ async function main(): Promise<void> {
       }
 
       selectedCounty = county;
-      const position = computePosition(svgEl, 340, 300);
-      showPopupChart({ container: mapContainer, county, position });
+      // Popup estimated dimensions: ~12px padding * 2 + max content width (320)
+      // = 344 wide. Height ~ 12*2 + slopes(120) + chart(220) + legend(60) = 424.
+      const popupW = 344;
+      const popupH = 430;
+      const position = computePosition(svgEl, popupW, popupH);
+      showPopupChart({
+        container: mapContainer,
+        county,
+        position,
+        slopeType: currentSlopeType,
+      });
     },
   });
 
