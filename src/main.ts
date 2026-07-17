@@ -145,42 +145,60 @@ async function main(): Promise<void> {
 
     html += `</div>`;
 
-    // Year range picker (period delta only).
+    // Year range picker (period delta only) — dual-handle timeline slider.
     if (isPeriodDelta && periodDeltaState) {
       const allYears = dataset.sourceYearRange;
+      const bStart = periodDeltaState.baseline.start;
+      const bEnd = periodDeltaState.baseline.end;
+      const rStart = periodDeltaState.recent.start;
+      const rEnd = periodDeltaState.recent.end;
       html += `
         <div class="pd-section pd-year-picker" style="display:block">
           <div class="slope-selector-title">Year Ranges:</div>
-
-          <div class="pd-year-group">
-            <label for="pd-baseline-start">Baseline start:</label>
-            <input type="number" id="pd-baseline-start" value="${periodDeltaState.baseline.start}" min="${allYears[0]}" max="${periodDeltaState.baseline.end - MIN_WINDOW_GAP}">
+          <div class="pd-timeline-labels">
+            <span id="pd-baseline-label">${bStart} \u2013 ${bEnd}</span>
+            <span id="pd-recent-label">${rStart} \u2013 ${rEnd}</span>
           </div>
-          <div class="pd-year-group">
-            <label for="pd-baseline-end">Baseline end:</label>
-            <input type="number" id="pd-baseline-end" value="${periodDeltaState.baseline.end}" min="${periodDeltaState.baseline.start + 1}" max="${allYears[1] - MIN_WINDOW_GAP}">
+          <div class="pd-timeline-container" id="pd-timeline-container">
+            <div class="pd-timeline-track" id="pd-timeline-track">
+              <!-- Visual markers for the two windows -->
+              <div id="pd-baseline-range" class="pd-timeline-range pd-baseline-range"></div>
+              <div id="pd-recent-range" class="pd-timeline-range pd-recent-range"></div>
+              <!-- Draggable handles -->
+              <div id="pd-baseline-center-handle" class="pd-timeline-handle pd-baseline-handle" style="left:${(((bStart + bEnd) / 2 - allYears[0]) / (allYears[1] - allYears[0])) * 100}%;"></div>
+              <div id="pd-recent-center-handle" class="pd-timeline-handle pd-recent-handle" style="left:${(((rStart + rEnd) / 2 - allYears[0]) / (allYears[1] - allYears[0])) * 100}%;"></div>
+            </div>
           </div>
-          <div class="pd-year-group">
-            <label for="pd-recent-start">Recent start:</label>
-            <input type="number" id="pd-recent-start" value="${periodDeltaState.recent.start}" min="${periodDeltaState.baseline.end + MIN_WINDOW_GAP}" max="${allYears[1] - 1}">
-          </div>
-          <div class="pd-year-group">
-            <label for="pd-recent-end">Recent end:</label>
-            <input type="number" id="pd-recent-end" value="${periodDeltaState.recent.end}" min="${periodDeltaState.recent.start + 1}" max="${allYears[1]}">
-          </div>
-          <div class="pd-year-group pd-window-size">
-            <label for="pd-window-size-input">Window years:</label>
-            <input type="number" id="pd-window-size-input" value="${periodDeltaState.baseline.end - periodDeltaState.baseline.start}" min="1" max="${Math.floor((allYears[1] - allYears[0]) / 2)}">
-          </div>
-          <div id="pd-year-error" class="pd-year-error"></div>
         </div>`;
     }
 
     panel.innerHTML = html;
     panel.style.display = isPeriodDelta || true ? "block" : "none";
 
-    // Wire up method radio buttons.
-    panel.addEventListener("change", (e: Event) => {
+    // --- Attach pointer handlers for timeline dragging on the container ---
+    const tlContainer = document.getElementById("pd-timeline-container");
+    if (tlContainer && periodDeltaState) {
+      tlContainer.addEventListener(
+        "pointerdown",
+        (evt: PointerEvent) => {
+          if (!(evt.target instanceof HTMLElement)) return;
+          // Check if the target or its parent is a timeline handle.
+          const handle = evt.target.closest(".pd-timeline-handle");
+          if (!handle || !(handle instanceof HTMLElement)) return;
+          if (!handle.id) return;
+          const isBaseline = handle.id === "pd-baseline-center-handle";
+          const target: "baseline" | "recent" = isBaseline ? "baseline" : "recent";
+          // Only grab pointer for timeline interaction.
+          (evt.currentTarget as HTMLElement).setPointerCapture(evt.pointerId);
+          evt.preventDefault();
+          setupTimelineDragging(target);
+        },
+        { passive: false },
+      );
+    }
+
+    // Handle panel change events (radio button selection).
+    const handlePanelChange = (e: Event) => {
       const target = e.target as HTMLInputElement;
       if (!target.name) return;
 
@@ -208,17 +226,10 @@ async function main(): Promise<void> {
         currentMetric = target.value as MetricType;
         applyMetricAndMethod();
       }
+    };
 
-      // Year range inputs changed.
-      if (target.id?.startsWith("pd-") && periodDeltaState) {
-        handleYearInputChange();
-      }
-
-      // Window size slider changed.
-      if (target.id === "pd-window-size-input" && periodDeltaState) {
-        handleWindowSizeChange();
-      }
-    });
+    // Wire up method radio buttons.
+    panel.addEventListener("change", handlePanelChange);
   }
 
   /** Initialize default year windows based on the dataset's record. */
@@ -233,87 +244,135 @@ async function main(): Promise<void> {
     };
   }
 
-  /** Handle changes to individual year input fields. */
-  function handleYearInputChange(): void {
+  // --- Timeline dragging state ---
+  let dragTarget: "baseline" | "recent" | null = null;
+
+  /** Set up pointer-based dragging on the timeline handles. */
+  function setupTimelineDragging(target: "baseline" | "recent"): void {
+    const timelineContainer = document.getElementById("pd-timeline-container");
+    if (!timelineContainer) return;
+
+    dragTarget = target;
+
+    // Attach to the track so movement outside the handle still works.
+    let trackEl: HTMLElement = document.getElementById("pd-timeline-track")!;
+
+    if (trackEl) {
+      trackEl.style.cursor = "grabbing";
+    }
+
+    function onPointerMove(moveEvt: PointerEvent): void {
+      moveEvt.preventDefault();
+      if (trackEl) {
+        const rect = trackEl.getBoundingClientRect();
+        // Clamp to track boundaries.
+        const pct = Math.max(0, Math.min(1, (moveEvt.clientX - rect.left) / rect.width));
+        updateTimelineFromPct(pct);
+      }
+    }
+
+    function onPointerUp(): void {
+      dragTarget = null;
+      if (trackEl) trackEl.style.cursor = "grab";
+      timelineContainer!.removeEventListener("pointermove", onPointerMove);
+      document.removeEventListener("pointerup", onPointerUp);
+    }
+
+    // Capture pointer from the pointerdown that triggered this call.
+    // The actual event is captured by the pointerdown handler that calls this function.
+    timelineContainer!.addEventListener("pointermove", onPointerMove);
+    document.addEventListener("pointerup", onPointerUp);
+  }
+
+  /** Compute window positions from a 0-1 percentage along the timeline. */
+  function updateTimelineFromPct(pct: number): void {
     if (!periodDeltaState) return;
-    panel.querySelector<HTMLElement>("#pd-year-error");
+    const allYears = dataset.sourceYearRange;
+    const yMin = allYears[0];
+    const yMax = allYears[1];
+    const totalSpan = yMax - yMin + 1;
+    const winSize = periodDeltaState.baseline.end - periodDeltaState.baseline.start;
+    const halfWin = Math.floor(winSize / 2);
 
-    const bStartEl = panel.querySelector<HTMLInputElement>("#pd-baseline-start");
-    const bEndEl = panel.querySelector<HTMLInputElement>("#pd-baseline-end");
-    const rStartEl = panel.querySelector<HTMLInputElement>("#pd-recent-start");
-    const rEndEl = panel.querySelector<HTMLInputElement>("#pd-recent-end");
-
-    if (!bStartEl || !bEndEl || !rStartEl || !rEndEl) return;
-
-    const bStart = parseInt(bStartEl.value, 10);
-    const bEnd = parseInt(bEndEl.value, 10);
-    const rStart = parseInt(rStartEl.value, 10);
-    const rEnd = parseInt(rEndEl.value, 10);
-
-    if (isNaN(bStart) || isNaN(bEnd) || isNaN(rStart) || isNaN(rEnd)) return;
-
-    // Validate constraints.
-    const [yMin, yMax] = dataset.sourceYearRange;
-    if (bStart < yMin || bEnd > yMax || rStart < yMin || rEnd > yMax) {
-      showYearError("Years must be within the dataset range.");
-      return;
-    }
-    if (bStart >= bEnd) {
-      showYearError("Baseline start must be before baseline end.");
-      return;
-    }
-    if (rStart < rEnd) {
-      showYearError("Recent start must be before recent end.");
-      return;
-    }
-    if (rStart - bEnd < MIN_WINDOW_GAP) {
-      showYearError(
-        `Baseline and recent windows must differ by at least ${MIN_WINDOW_GAP} years.`,
-      );
-      return;
+    if (dragTarget === "baseline" && periodDeltaState) {
+      const centeredYear = Math.round(yMin + pct * totalSpan);
+      // Constrain baseline center so it stays at least winSize/2 from edges
+      // and at least MIN_WINDOW_GAP before the recent window.
+      const maxBCenter = periodDeltaState.recent.start - MIN_WINDOW_GAP - 1;
+      const minBCenter = yMin + halfWin;
+      const bCenter = clampYear(centeredYear, minBCenter, maxBCenter);
+      periodDeltaState.baseline = { start: bCenter - halfWin, end: bCenter + halfWin };
     }
 
-    hideYearError();
-    periodDeltaState.baseline = { start: bStart, end: bEnd };
-    periodDeltaState.recent = { start: rStart, end: rEnd };
-    computeAndApplyPeriodDelta();
+    if (dragTarget === "recent" && periodDeltaState) {
+      const centeredYear = Math.round(yMin + pct * totalSpan);
+      // Constrain recent center so it stays at least winSize/2 from edges
+      // and at least MIN_WINDOW_GAP after the baseline window.
+      const minRCenter = periodDeltaState.baseline.end + MIN_WINDOW_GAP + halfWin;
+      const maxRCenter = yMax - halfWin;
+      const rCenter = clampYear(centeredYear, minRCenter, maxRCenter);
+      periodDeltaState.recent = { start: rCenter - halfWin, end: rCenter + halfWin };
+    }
+
+    updateTimelineUI();
   }
 
-  /** Handle changes to the window size input. */
-  function handleWindowSizeChange(): void {
+  function clampYear(val: number, lo: number, hi: number): number {
+    return Math.max(lo, Math.min(hi, val));
+  }
+
+  /** Update the timeline UI (handles + labels) without recomputing data. */
+  function updateTimelineUI(): void {
     if (!periodDeltaState) return;
-    const sizeEl = panel.querySelector<HTMLInputElement>("#pd-window-size-input");
-    if (!sizeEl) return;
+    const allYears = dataset.sourceYearRange;
+    const winSize = periodDeltaState.baseline.end - periodDeltaState.baseline.start;
 
-    const newSize = parseInt(sizeEl.value, 10);
-    if (isNaN(newSize) || newSize < 1) return;
-
-    const [yMin, yMax] = dataset.sourceYearRange;
-    const maxWinSize = Math.floor((yMax - yMin + 1) / 2);
-    const clampedSize = Math.max(1, Math.min(newSize, maxWinSize));
-
-    if (clampedSize !== newSize) {
-      sizeEl.value = String(clampedSize);
+    // Update handles position.
+    const bHandle = document.getElementById("pd-baseline-center-handle");
+    const rHandle = document.getElementById("pd-recent-center-handle");
+    if (bHandle) {
+      const bCenter =
+        (periodDeltaState.baseline.start + periodDeltaState.baseline.end) / 2;
+      const pct = ((bCenter - allYears[0]) / (allYears[1] - allYears[0])) * 100;
+      bHandle.style.left = `${pct}%`;
+    }
+    if (rHandle) {
+      const rCenter = (periodDeltaState.recent.start + periodDeltaState.recent.end) / 2;
+      const pct = ((rCenter - allYears[0]) / (allYears[1] - allYears[0])) * 100;
+      rHandle.style.left = `${pct}%`;
     }
 
-    // Keep windows anchored at the dataset extremes.
-    periodDeltaState.baseline.start = yMin;
-    periodDeltaState.baseline.end = yMin + clampedSize - 1;
-    periodDeltaState.recent.start = yMax - clampedSize + 1;
-    periodDeltaState.recent.end = yMax;
+    // Update window range indicators.
+    const bRange = document.getElementById("pd-baseline-range");
+    const rRange = document.getElementById("pd-recent-range");
+    if (bRange) {
+      const bLeft =
+        ((periodDeltaState.baseline.start - allYears[0]) / (allYears[1] - allYears[0])) *
+        100;
+      const bWidth = (winSize / (allYears[1] - allYears[0])) * 100;
+      bRange.style.left = `${bLeft}%`;
+      bRange.style.width = `${bWidth}%`;
+    }
+    if (rRange) {
+      const rLeft =
+        ((periodDeltaState.recent.start - allYears[0]) / (allYears[1] - allYears[0])) *
+        100;
+      const rWidth = (winSize / (allYears[1] - allYears[0])) * 100;
+      rRange.style.left = `${rLeft}%`;
+      rRange.style.width = `${rWidth}%`;
+    }
 
-    hideYearError();
+    // Update label text.
+    const bLabel = document.getElementById("pd-baseline-label");
+    const rLabel = document.getElementById("pd-recent-label");
+    if (bLabel) {
+      bLabel.textContent = `${periodDeltaState.baseline.start} \u2013 ${periodDeltaState.baseline.end}`;
+    }
+    if (rLabel) {
+      rLabel.textContent = `${periodDeltaState.recent.start} \u2013 ${periodDeltaState.recent.end}`;
+    }
+
     computeAndApplyPeriodDelta();
-  }
-
-  function showYearError(msg: string): void {
-    const errorEl = panel.querySelector<HTMLElement>("#pd-year-error");
-    if (errorEl) errorEl.textContent = msg;
-  }
-
-  function hideYearError(): void {
-    const errorEl = panel.querySelector<HTMLElement>("#pd-year-error");
-    if (errorEl) errorEl.textContent = "";
   }
 
   /** Recolor the map and update legends based on current method/metric/window state. */
@@ -698,8 +757,8 @@ async function main(): Promise<void> {
         position,
         slopeType: chartSlopeType,
         method: currentMethod,
-        periodDeltaWindows: isFinite(periodDeltaState?.baseline.start ?? 0)
-          ? { baseline: periodDeltaState!.baseline, recent: periodDeltaState!.recent }
+        periodDeltaWindows: periodDeltaState
+          ? { baseline: periodDeltaState.baseline, recent: periodDeltaState.recent }
           : undefined,
       });
     },
