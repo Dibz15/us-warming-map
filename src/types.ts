@@ -32,6 +32,24 @@ export interface CountyTrend {
   slopeSeasonalAmplitude: number;
 }
 
+/** Temperature metric types for choropleth and period delta calculation. */
+export type MetricType = "tmax" | "tmean" | "tmin" | "true_dtr" | "seasonal_amplitude";
+
+/** Computation method for the choropleth. */
+export type MethodType = "trend" | "period_delta";
+
+/** Window selection for period delta calculation. */
+export interface YearWindow {
+  start: number;
+  end: number;
+}
+
+/** State for period delta year range controls. */
+export interface PeriodDeltaWindows {
+  baseline: YearWindow;
+  recent: YearWindow;
+}
+
 export interface CountyDataset {
   generatedAt: string; // ISO date the pipeline was last run
   sourceYearRange: [number, number];

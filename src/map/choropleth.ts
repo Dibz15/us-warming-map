@@ -10,10 +10,11 @@ import { feature } from "topojson-client";
 import { geoPath, geoAlbersUsa } from "d3-geo";
 import { select } from "d3-selection";
 import { zoom, zoomIdentity } from "d3-zoom";
-import type { CountyDataset, CountyTrend } from "@/types";
-import type { slopeColorScale } from "./colorScale";
-import { dtrColorScale, ampColorScale } from "./colorScale";
-import type { SlopeType } from "@/data/loadCountyData";
+import type { CountyDataset, MetricType, MethodType } from "@/types";
+import { dtrColorScale, ampColorScale, slopeColorScale } from "./colorScale";
+
+/** Lookup map from FIPS code to a numeric value (slope or period delta). */
+export type ValueMap = Map<string, number>;
 
 // Extend SVGSVGElement to hold our runtime context reference.
 interface ExtendedSVGElement extends SVGSVGElement {
@@ -215,69 +216,94 @@ export function renderChoropleth(options: ChoroplethOptions): void {
 }
 
 /**
- * Update the fill color of all county paths in the choropleth SVG
- * based on a selected slope type (max, mean, min, true_dtr, or seasonal_amplitude).
+ * Update the fill color of all county paths in the choropleth SVG.
+ *
+ * When `method` is "trend", uses precomputed slopes from `dataset`.
+ * When `method` is "period_delta", uses the provided `valueMap` instead.
  */
 export function updateMapColors(
   svgEl: SVGSVGElement,
-  slopeType: SlopeType,
-  dataset: CountyDataset,
-  colorScaleFn: typeof slopeColorScale,
+  options: {
+    method: MethodType;
+    metric: MetricType;
+    dataset: CountyDataset;
+    colorScaleFn: (domain: [number, number]) => (v: number) => string;
+    valueMap?: ValueMap;
+    domain: [number, number];
+  },
 ): void {
+  const { method, metric, valueMap, domain } = options;
   const svg = svgEl as unknown as ExtendedSVGElement;
   const context = svg.__choroplethContext;
   if (!context) return;
 
-  // Diverging one-dimensional types (true_dtr, seasonal_amplitude).
-  if (slopeType === "true_dtr" || slopeType === "seasonal_amplitude") {
-    const colorKey = slopeType === "true_dtr" ? "true_dtr" : "seasonal_amplitude";
-    const domain = dataset.slopeDomains[colorKey] ?? [-1, 1];
-
-    // Choose the appropriate scale function.
-    const colorFn =
-      slopeType === "true_dtr" ? dtrColorScale(domain) : ampColorScale(domain);
-
-    select(svgEl)
-      .selectAll<SVGPathElement, CountyFeature>(".county-path")
-      .attr("fill", (d) => {
-        const fips = String(d.id).padStart(5, "0");
-        const county = context.countyDataMap.get(fips);
-        if (!county) return "#ccc";
-        const slope =
-          slopeType === "true_dtr" ? county.slopeTrueDTR : county.slopeSeasonalAmplitude;
-        if (Number.isNaN(slope)) return "#ccc";
-        return colorFn(slope);
-      });
-    return;
-  }
-
-  // Get the appropriate domain for this slope type.
-  const domain = dataset.slopeDomains[slopeType] ?? [-1, 1];
-
-  // Build a new color scale for this domain.
-  const scaledColorScale = colorScaleFn(domain);
-
-  // Map of slope type to the corresponding CountyTrend field name.
-  const SLOPE_FIELD: Record<
-    string,
-    keyof Pick<CountyTrend, "slopeTMax" | "slopeTMean" | "slopeTMin">
-  > = {
-    tmax: "slopeTMax",
-    tmean: "slopeTMean",
-    tmin: "slopeTMin",
-  };
-
-  const field = SLOPE_FIELD[slopeType];
+  // Choose the color function based on metric (for period delta we always use the diverging scale).
+  const colorFn = computeColorFunction(metric, domain);
 
   // Update fill for each county path.
   select(svgEl)
     .selectAll<SVGPathElement, CountyFeature>(".county-path")
     .attr("fill", (d) => {
       const fips = String(d.id).padStart(5, "0");
-      const county = context.countyDataMap.get(fips);
-      if (!county) return "#ccc";
-      const slope = county[field] as number;
-      if (Number.isNaN(slope)) return "#ccc";
-      return scaledColorScale(slope);
+      let value: number;
+
+      if (method === "period_delta" && valueMap) {
+        // Use the provided value map (e.g., period delta values).
+        value = valueMap.get(fips) ?? NaN;
+      } else {
+        // Trend mode: use precomputed slopes from dataset.
+        const county = context.countyDataMap.get(fips);
+        if (!county) return "#ccc";
+
+        // Map metric to the appropriate slope field.
+        const value = getTrendValue(county, metric);
+        if (value === undefined || Number.isNaN(value)) return "#ccc";
+        return colorFn(value);
+      }
+
+      if (Number.isNaN(value)) return "#ccc";
+      return colorFn(value);
     });
+}
+
+/**
+ * Compute the appropriate color function for a given metric and domain.
+ */
+function computeColorFunction(
+  metric: MetricType,
+  domain: [number, number],
+): (value: number) => string {
+  // For metrics that use the standard blue-white-red diverging scale.
+  if (["tmax", "tmean", "tmin"].includes(metric)) {
+    return slopeColorScale(domain);
+  }
+
+  // Use purple-white-green for DTR and seasonal amplitude (matching pipeline palette).
+  if (metric === "true_dtr") {
+    return dtrColorScale(domain);
+  }
+
+  // Seasonal amplitude also uses the same diverging scale.
+  return ampColorScale(domain);
+}
+
+/**
+ * Get the trend value for a county given a metric type.
+ */
+function getTrendValue(
+  county: NonNullable<CountyDataset["counties"]>[number],
+  metric: MetricType,
+): number | undefined {
+  switch (metric) {
+    case "tmax":
+      return county.slopeTMax;
+    case "tmean":
+      return county.slopeTMean;
+    case "tmin":
+      return county.slopeTMin;
+    case "true_dtr":
+      return county.slopeTrueDTR;
+    case "seasonal_amplitude":
+      return county.slopeSeasonalAmplitude;
+  }
 }
