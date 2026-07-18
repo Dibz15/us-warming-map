@@ -3,7 +3,13 @@
 
 import { select } from "d3-selection";
 import { scaleLinear } from "d3-scale";
-import type { CountyDataset, MethodType, MetricType, YearWindow } from "@/types";
+import type {
+  CountyDataset,
+  MethodType,
+  MetricType,
+  PeriodDeltaWindows,
+  YearWindow,
+} from "@/types";
 import type { SlopeType } from "@/data/loadCountyData";
 
 // d3-axis has no TypeScript types in this package. Declare minimal interfaces.
@@ -21,6 +27,12 @@ const METHOD_UNITS: Record<MethodType, string> = {
   trend: "\u00b0F/decade",
   period_delta: "\u00b0F",
 };
+
+/** Updater returned by showPopupChart for dynamic state updates. */
+export interface PopupUpdater {
+  /** Update the popup chart with new period delta windows and metric. */
+  update(periodDeltaWindows: PeriodDeltaWindows): void;
+}
 
 /** Options for showPopupChart. */
 export interface PopupChartOptions {
@@ -50,6 +62,8 @@ const COLORS = {
   background: "#fff",
   gridLine: "#e8e8e8",
   textColor: "#333",
+  baselineWindow: "rgba(5, 113, 176, 0.15)", // blue tint
+  recentWindow: "rgba(215, 48, 39, 0.15)", // red tint
 };
 
 /** Labels used in the popup legend. */
@@ -61,7 +75,95 @@ const SERIES_LABELS: Record<SlopeType, string> = {
   seasonal_amplitude: "seasonal amplitude",
 };
 
-export async function showPopupChart(options: PopupChartOptions): Promise<void> {
+/** Metrics to display in period delta mode. */
+const PERIOD_DELTA_METRICS: Array<{ key: MetricType; label: string }> = [
+  { key: "tmax", label: "Max" },
+  { key: "tmean", label: "Avg" },
+  { key: "tmin", label: "Min" },
+  { key: "true_dtr", label: "DTR" },
+  { key: "seasonal_amplitude", label: "Seasonal" },
+];
+
+/**
+ * Compute the mean of values in [wStart, wEnd] inclusive from a year->value map.
+ */
+function windowMean(
+  yearToValue: Map<number, number>,
+  wStart: number,
+  wEnd: number,
+): number {
+  let sum = 0;
+  let count = 0;
+  for (let y = wStart; y <= wEnd; y++) {
+    const v = yearToValue.get(y);
+    if (v != null && Number.isFinite(v)) {
+      sum += v;
+      count++;
+    }
+  }
+  return count > 0 ? sum / count : NaN;
+}
+
+/**
+ * Compute a period delta for a given county metric using the active windows.
+ */
+function computePeriodDelta(
+  countyData: NonNullable<CountyDataset["counties"]>[number],
+  metric: MetricType,
+  baseline: YearWindow,
+  recent: YearWindow,
+): number {
+  const series = countyData.series;
+  if (!series || series.length === 0) return NaN;
+
+  // Build a lookup from year to metric value.
+  const yearToValue = new Map<number, number>();
+  for (const record of series) {
+    let val: number;
+    switch (metric) {
+      case "tmax":
+        val = record.tmax;
+        break;
+      case "tmin":
+        val = record.tmin;
+        break;
+      case "tmean":
+        val = (record.tmax + record.tmin) / 2;
+        break;
+      case "true_dtr":
+        val = record.true_dtr;
+        break;
+      case "seasonal_amplitude":
+        val = record.tmax - record.tmin;
+        break;
+      default:
+        return NaN;
+    }
+    yearToValue.set(record.year, val);
+  }
+
+  const baselineMean = windowMean(yearToValue, baseline.start, baseline.end);
+  const recentMean = windowMean(yearToValue, recent.start, recent.end);
+  if (!Number.isFinite(baselineMean) || !Number.isFinite(recentMean)) return NaN;
+  return recentMean - baselineMean;
+}
+
+/** Format a numeric value with sign prefix and color. */
+function formatValue(
+  value: number,
+  warmColor: string,
+  coolColor: string,
+): { label: string; color: string } {
+  if (!Number.isFinite(value)) return { label: "\u2014", color: COLORS.textColor };
+  const valStr = Math.abs(value).toFixed(2);
+  const isWarming = value > 0.001;
+  const isCooling = value < -0.001;
+  const color = isWarming ? warmColor : isCooling ? coolColor : COLORS.textColor;
+  const prefix = isWarming ? "+" : isCooling ? "\u2212" : "";
+  return { label: `${prefix}${valStr}`, color };
+}
+
+export async function showPopupChart(options: PopupChartOptions): Promise<PopupUpdater> {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const { axisBottom, axisLeft } = await import("d3-axis" as any);
   const { container, county, position, slopeType, onClose } = options;
@@ -183,85 +285,6 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
     return { label: `${prefix}${valStr}`, color };
   }
 
-  // Determine whether to show period delta values or OLS slopes in the popup.
-  const isPeriodDelta = options.method === "period_delta" && options.periodDeltaWindows;
-  const displayUnits = isPeriodDelta ? METHOD_UNITS.period_delta : METHOD_UNITS.trend;
-
-  /** Compute a period delta for a given county metric using the active windows. */
-  function computePeriodDelta(
-    countyData: NonNullable<CountyDataset["counties"]>[number],
-    metric: MetricType,
-  ): number {
-    if (!isPeriodDelta) return NaN;
-    const { baseline, recent } = options.periodDeltaWindows!;
-    const series = countyData.series;
-    if (!series || series.length === 0) return NaN;
-
-    // Build a lookup from year to metric value.
-    const yearToValue = new Map<number, number>();
-    for (const record of series) {
-      let val: number;
-      switch (metric) {
-        case "tmax":
-          val = record.tmax;
-          break;
-        case "tmin":
-          val = record.tmin;
-          break;
-        case "tmean":
-          val = (record.tmax + record.tmin) / 2;
-          break;
-        case "true_dtr":
-          val = record.true_dtr;
-          break;
-        case "seasonal_amplitude":
-          val = record.tmax - record.tmin;
-          break;
-        default:
-          return NaN;
-      }
-      yearToValue.set(record.year, val);
-    }
-
-    const baselineMean = windowMean(yearToValue, baseline.start, baseline.end);
-    const recentMean = windowMean(yearToValue, recent.start, recent.end);
-    if (!Number.isFinite(baselineMean) || !Number.isFinite(recentMean)) return NaN;
-    return recentMean - baselineMean;
-  }
-
-  /** Compute the mean of values in [wStart, wEnd] inclusive from a year->value map. */
-  function windowMean(
-    yearToValue: Map<number, number>,
-    wStart: number,
-    wEnd: number,
-  ): number {
-    let sum = 0;
-    let count = 0;
-    for (let y = wStart; y <= wEnd; y++) {
-      const v = yearToValue.get(y);
-      if (v != null && Number.isFinite(v)) {
-        sum += v;
-        count++;
-      }
-    }
-    return count > 0 ? sum / count : NaN;
-  }
-
-  /** Format a numeric value with sign prefix and color. */
-  function formatValue(
-    value: number,
-    warmColor: string,
-    coolColor: string,
-  ): { label: string; color: string } {
-    if (!Number.isFinite(value)) return { label: "\u2014", color: COLORS.textColor };
-    const valStr = Math.abs(value).toFixed(2);
-    const isWarming = value > 0.001;
-    const isCooling = value < -0.001;
-    const color = isWarming ? warmColor : isCooling ? coolColor : COLORS.textColor;
-    const prefix = isWarming ? "+" : isCooling ? "\u2212" : "";
-    return { label: `${prefix}${valStr}`, color };
-  }
-
   // Slopes container.
   const slopesDiv = overlay
     .append("div")
@@ -271,72 +294,6 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
     .style("gap", "3px")
     .style("margin-bottom", "8px")
     .style("min-width", "140px");
-
-  if (isPeriodDelta) {
-    // Period Delta: compute deltas for each metric and display.
-    const metrics: Array<{ key: MetricType; label: string }> = [
-      { key: "tmax", label: "Max" },
-      { key: "tmean", label: "Avg" },
-      { key: "tmin", label: "Min" },
-      { key: "true_dtr", label: "DTR" },
-      { key: "seasonal_amplitude", label: "Seasonal" },
-    ];
-    for (const { key, label } of metrics) {
-      const delta = computePeriodDelta(county, key);
-      const styled = formatValue(delta, COLORS.tmax, COLORS.tmin);
-      slopesDiv
-        .append("div")
-        .style("font-size", "11px")
-        .style("font-weight", "500")
-        .style("color", styled.color)
-        .text(`${label}: ${styled.label} ${displayUnits}`);
-    }
-  } else {
-    // Trend mode: show OLS slopes from the precomputed dataset.
-    const tmaxSlope = formatSlope(county.slopeTMax, COLORS.tmax, COLORS.tmin);
-    slopesDiv
-      .append("div")
-      .style("font-size", "11px")
-      .style("font-weight", "500")
-      .style("color", tmaxSlope.color)
-      .text(`Max: ${tmaxSlope.label} °F/decade`);
-
-    const tmeanSlope = formatSlope(county.slopeTMean, COLORS.tmax, COLORS.tmin);
-    slopesDiv
-      .append("div")
-      .style("font-size", "11px")
-      .style("font-weight", "500")
-      .style("color", tmeanSlope.color)
-      .text(`Avg: ${tmeanSlope.label} °F/decade`);
-
-    const tminSlope = formatSlope(county.slopeTMin, COLORS.tmax, COLORS.tmin);
-    slopesDiv
-      .append("div")
-      .style("font-size", "11px")
-      .style("font-weight", "500")
-      .style("color", tminSlope.color)
-      .text(`Min: ${tminSlope.label} °F/decade`);
-
-    const trueDtrSlope = formatSlope(county.slopeTrueDTR, COLORS.tmax, COLORS.tmin);
-    slopesDiv
-      .append("div")
-      .style("font-size", "11px")
-      .style("font-weight", "500")
-      .style("color", trueDtrSlope.color)
-      .text(`DTR: ${trueDtrSlope.label} °F/decade`);
-
-    const seasonAmpSlope = formatSlope(
-      county.slopeSeasonalAmplitude,
-      COLORS.tmax,
-      COLORS.tmin,
-    );
-    slopesDiv
-      .append("div")
-      .style("font-size", "11px")
-      .style("font-weight", "500")
-      .style("color", seasonAmpSlope.color)
-      .text(`Seasonal change: ${seasonAmpSlope.label} °F/decade`);
-  }
 
   // Chart SVG — container height must match CHART_HEIGHT so the SVG does not
   // overflow and overlap the legend below. Centered with margin: auto.
@@ -358,13 +315,18 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
 
   // Prepare data for the active series
   const data = county.series;
-  if (!data || data.length === 0) return;
+  if (!data || data.length === 0) {
+    // Return a no-op updater if there's no data.
+    return { update: () => {} };
+  }
 
   const years = data.map((d) => d.year);
 
   // Filter out NaN values for scale calculation
   const validValues = activeSeries.values.filter((v) => !isNaN(v));
-  if (validValues.length === 0) return;
+  if (validValues.length === 0) {
+    return { update: () => {} };
+  }
 
   // X scale (years)
   const xMin = Math.min(...years);
@@ -381,6 +343,31 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
   const yScale = scaleLinear()
     .domain([yMin - yPad, yMax + yPad])
     .range([PLOT_HEIGHT, 0]);
+
+  // Shaded window indicator groups (layered before the series line).
+  const windowLayer = g
+    .insert("g", ".active-series-line")
+    .attr("class", "window-indicators");
+
+  // Baseline window shaded area.
+  const baselineRect = windowLayer
+    .append("rect")
+    .attr("class", "window-rect baseline-window")
+    .attr("y", 0)
+    .attr("height", PLOT_HEIGHT)
+    .attr("rx", 2)
+    .attr("fill", COLORS.baselineWindow)
+    .style("opacity", 0);
+
+  // Recent window shaded area.
+  const recentRect = windowLayer
+    .append("rect")
+    .attr("class", "window-rect recent-window")
+    .attr("y", 0)
+    .attr("height", PLOT_HEIGHT)
+    .attr("rx", 2)
+    .attr("fill", COLORS.recentWindow)
+    .style("opacity", 0);
 
   // Grid lines
   const gridTicks = yScale.ticks(6);
@@ -521,4 +508,114 @@ export async function showPopupChart(options: PopupChartOptions): Promise<void> 
   setTimeout(() => {
     document.addEventListener("click", handleClickOutside);
   }, 100);
+
+  /** Populate the slopes/div delta text elements. */
+  function populateSlopesText(periodWindows: PeriodDeltaWindows): void {
+    // Clear existing text nodes from slopesDiv (keep the element itself).
+    slopesDiv.selectAll("*").remove();
+
+    if (options.method === "period_delta") {
+      const units = METHOD_UNITS.period_delta;
+      for (const { key, label } of PERIOD_DELTA_METRICS) {
+        const delta = computePeriodDelta(
+          county,
+          key,
+          periodWindows.baseline,
+          periodWindows.recent,
+        );
+        const styled = formatValue(delta, COLORS.tmax, COLORS.tmin);
+        slopesDiv
+          .append("div")
+          .style("font-size", "11px")
+          .style("font-weight", "500")
+          .style("color", styled.color)
+          .text(`${label}: ${styled.label} ${units}`);
+      }
+    } else {
+      // Trend mode: show OLS slopes from the precomputed dataset.
+      const tmaxSlope = formatSlope(county.slopeTMax, COLORS.tmax, COLORS.tmin);
+      slopesDiv
+        .append("div")
+        .style("font-size", "11px")
+        .style("font-weight", "500")
+        .style("color", tmaxSlope.color)
+        .text(`Max: ${tmaxSlope.label} °F/decade`);
+
+      const tmeanSlope = formatSlope(county.slopeTMean, COLORS.tmax, COLORS.tmin);
+      slopesDiv
+        .append("div")
+        .style("font-size", "11px")
+        .style("font-weight", "500")
+        .style("color", tmeanSlope.color)
+        .text(`Avg: ${tmeanSlope.label} °F/decade`);
+
+      const tminSlope = formatSlope(county.slopeTMin, COLORS.tmax, COLORS.tmin);
+      slopesDiv
+        .append("div")
+        .style("font-size", "11px")
+        .style("font-weight", "500")
+        .style("color", tminSlope.color)
+        .text(`Min: ${tminSlope.label} °F/decade`);
+
+      const trueDtrSlope = formatSlope(county.slopeTrueDTR, COLORS.tmax, COLORS.tmin);
+      slopesDiv
+        .append("div")
+        .style("font-size", "11px")
+        .style("font-weight", "500")
+        .style("color", trueDtrSlope.color)
+        .text(`DTR: ${trueDtrSlope.label} °F/decade`);
+
+      const seasonAmpSlope = formatSlope(
+        county.slopeSeasonalAmplitude,
+        COLORS.tmax,
+        COLORS.tmin,
+      );
+      slopesDiv
+        .append("div")
+        .style("font-size", "11px")
+        .style("font-weight", "500")
+        .style("color", seasonAmpSlope.color)
+        .text(`Seasonal change: ${seasonAmpSlope.label} °F/decade`);
+    }
+  }
+
+  /** Update the window indicator rectangles on the SVG. */
+  function updateWindowIndicators(periodWindows: PeriodDeltaWindows): void {
+    const isPeriod = options.method === "period_delta";
+
+    if (isPeriod) {
+      const bLeft = xScale(Math.max(periodWindows.baseline.start, xScale.domain()[0]));
+      const bRight = xScale(Math.min(periodWindows.baseline.end, xScale.domain()[1]));
+      const bWidth = Math.max(0, bRight - bLeft);
+      baselineRect.attr("x", bLeft).attr("width", bWidth).style("opacity", 1);
+
+      const rLeft = xScale(Math.max(periodWindows.recent.start, xScale.domain()[0]));
+      const rRight = xScale(Math.min(periodWindows.recent.end, xScale.domain()[1]));
+      const rWidth = Math.max(0, rRight - rLeft);
+      recentRect.attr("x", rLeft).attr("width", rWidth).style("opacity", 1);
+    } else {
+      baselineRect.style("opacity", 0).attr("width", 0);
+      recentRect.style("opacity", 0).attr("width", 0);
+    }
+  }
+
+  // Initial population of slopes and window indicators.
+  populateSlopesText({
+    baseline: options.periodDeltaWindows?.baseline ?? { start: xMin, end: xMin },
+    recent: options.periodDeltaWindows?.recent ?? { start: xMax, end: xMax },
+  });
+  updateWindowIndicators({
+    baseline: options.periodDeltaWindows?.baseline ?? { start: xMin, end: xMin },
+    recent: options.periodDeltaWindows?.recent ?? { start: xMax, end: xMax },
+  });
+
+  // Return the updater function.
+  return {
+    update(periodDeltaWindows: PeriodDeltaWindows): void {
+      // Recalculate and update slope/delta text.
+      populateSlopesText(periodDeltaWindows);
+      // Update the window indicator rectangles.
+      updateWindowIndicators(periodDeltaWindows);
+    },
+  };
 }

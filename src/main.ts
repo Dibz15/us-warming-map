@@ -6,7 +6,7 @@ import { slopeColorScale, dtrColorScale, ampColorScale } from "@/map/colorScale"
 import { renderChoropleth, updateMapColors } from "@/map/choropleth";
 import { showPopupChart } from "@/chart/popupChart";
 import type { CountyDataset, MetricType, MethodType, YearWindow } from "@/types";
-import type { PopupPosition } from "@/chart/popupChart";
+import type { PopupPosition, PopupUpdater } from "@/chart/popupChart";
 
 export type { SlopeType } from "@/data/loadCountyData";
 
@@ -91,6 +91,9 @@ async function main(): Promise<void> {
   let currentMethod: MethodType = "trend";
   let periodDeltaState: PeriodDeltaState | null = null;
   let currentDomain: [number, number] = tmeanDomain;
+
+  /** Track the active popup chart updater for dynamic timeline updates. */
+  let currentPopupUpdater: PopupUpdater | null = null;
 
   // --- Settings toggle button and panel ---
   const toggleBtn = document.createElement("button");
@@ -373,6 +376,14 @@ async function main(): Promise<void> {
     }
 
     computeAndApplyPeriodDelta();
+
+    // Update the active popup chart's window indicators and delta text.
+    if (currentPopupUpdater && periodDeltaState) {
+      currentPopupUpdater.update({
+        baseline: periodDeltaState.baseline,
+        recent: periodDeltaState.recent,
+      });
+    }
   }
 
   /** Recolor the map and update legends based on current method/metric/window state. */
@@ -760,6 +771,8 @@ async function main(): Promise<void> {
         periodDeltaWindows: periodDeltaState
           ? { baseline: periodDeltaState.baseline, recent: periodDeltaState.recent }
           : undefined,
+      }).then((updater) => {
+        currentPopupUpdater = updater;
       });
     },
   });
