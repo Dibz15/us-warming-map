@@ -28,10 +28,20 @@ const METHOD_UNITS: Record<MethodType, string> = {
   period_delta: "\u00b0F",
 };
 
+/** Configuration options for updating the popup chart. */
+export interface PopupUpdateOptions {
+  /** The active metric/slope type (e.g., 'tmax', 'tmean', 'tmin'). */
+  slopeType?: SlopeType;
+  /** When "period_delta", uses windowed mean deltas instead of OLS slopes. */
+  method?: MethodType;
+  /** Baseline and recent windows for period delta mode. */
+  periodDeltaWindows?: PeriodDeltaWindows;
+}
+
 /** Updater returned by showPopupChart for dynamic state updates. */
 export interface PopupUpdater {
-  /** Update the popup chart with new period delta windows and metric. */
-  update(periodDeltaWindows: PeriodDeltaWindows): void;
+  /** Update the popup chart with new configuration options. */
+  update(options: PopupUpdateOptions): void;
 }
 
 /** Options for showPopupChart. */
@@ -615,13 +625,178 @@ export async function showPopupChart(options: PopupChartOptions): Promise<PopupU
     recent: options.periodDeltaWindows?.recent ?? { start: xMax, end: xMax },
   });
 
+  // Capture initial options for closure references.
+  const opts = {
+    slopeType,
+    method: options.method,
+    periodDeltaWindows: options.periodDeltaWindows,
+  };
+
   // Return the updater function.
   return {
-    update(periodDeltaWindows: PeriodDeltaWindows): void {
-      // Recalculate and update slope/delta text.
-      populateSlopesText(periodDeltaWindows);
-      // Update the window indicator rectangles.
-      updateWindowIndicators(periodDeltaWindows);
+    update(options: PopupUpdateOptions): void {
+      // Update slope/delta text if method or period windows changed.
+      if (options.method !== undefined || options.periodDeltaWindows !== undefined) {
+        const currentWindows = options.periodDeltaWindows ?? {
+          baseline: opts.periodDeltaWindows?.baseline ?? { start: xMin, end: xMin },
+          recent: opts.periodDeltaWindows?.recent ?? { start: xMax, end: xMax },
+        };
+        populateSlopesText(currentWindows);
+        updateWindowIndicators(currentWindows);
+      }
+
+      // Update the series line if slope type changed.
+      if (options.slopeType !== undefined && options.slopeType !== opts.slopeType) {
+        const newActiveSeries = getActiveSeriesForType(options.slopeType);
+        updateSeriesLine(newActiveSeries);
+        updateLegend(newActiveSeries);
+      }
     },
   };
+
+  /** Helper to compute series for a given slope type. */
+  function getActiveSeriesForType(sType: SlopeType): {
+    values: number[];
+    color: string;
+    label: string;
+    dashed: boolean;
+  } {
+    switch (sType) {
+      case "tmax":
+        return {
+          values: county.series.map((d) => d.tmax ?? NaN),
+          color: COLORS.tmax,
+          label: SERIES_LABELS.tmax,
+          dashed: false,
+        };
+      case "tmin":
+        return {
+          values: county.series.map((d) => d.tmin ?? NaN),
+          color: COLORS.tmin,
+          label: SERIES_LABELS.tmin,
+          dashed: false,
+        };
+      case "tmean": {
+        const meanVals = county.series.map((d) => {
+          if (isNaN(d.tmax) || isNaN(d.tmin)) return NaN;
+          return (d.tmax + d.tmin) / 2;
+        });
+        return {
+          values: meanVals,
+          color: COLORS.tmean,
+          label: SERIES_LABELS.tmean,
+          dashed: false,
+        };
+      }
+      case "true_dtr":
+        return {
+          values: county.series.map((d) => d.true_dtr ?? NaN),
+          color: COLORS.trueDtr,
+          label: SERIES_LABELS.true_dtr,
+          dashed: true,
+        };
+      case "seasonal_amplitude": {
+        const ampVals = county.series.map((d) => {
+          if (isNaN(d.tmax) || isNaN(d.tmin)) return NaN;
+          return d.tmax - d.tmin;
+        });
+        return {
+          values: ampVals,
+          color: COLORS.seasonAmp,
+          label: SERIES_LABELS.seasonal_amplitude,
+          dashed: false,
+        };
+      }
+    }
+  }
+
+  /** Helper to rebuild Y scale from a series' valid values. */
+  function computeYScale(
+    values: number[],
+  ): import("d3-scale").ScaleLinear<number, number> {
+    const valid = values.filter((v) => !isNaN(v));
+    if (valid.length === 0) {
+      return scaleLinear().domain([0, 1]).range([PLOT_HEIGHT, 0]);
+    }
+    const yMin = Math.min(...valid);
+    const yMax = Math.max(...valid);
+    const yPad = (yMax - yMin) * 0.15 || 1;
+    return scaleLinear()
+      .domain([yMin - yPad, yMax + yPad])
+      .range([PLOT_HEIGHT, 0]);
+  }
+
+  /** Helper to update the series path and styling. */
+  function updateSeriesLine(activeSeries: {
+    values: number[];
+    color: string;
+    dashed: boolean;
+  }): void {
+    const newYScale = computeYScale(activeSeries.values);
+
+    // Rebuild the line path using the new scale.
+    let path = "";
+    for (let i = 0; i < data.length; i++) {
+      const cx = xScale(data[i].year);
+      const cy = newYScale(activeSeries.values[i]);
+      if (isNaN(cy)) continue;
+      path += (path === "" ? "M" : "L") + `${cx},${cy}`;
+    }
+
+    // Update the series line.
+    g.select(".active-series-line")
+      .attr("d", path)
+      .attr("stroke", activeSeries.color)
+      .attr("stroke-dasharray", activeSeries.dashed ? "4,2" : null);
+
+    // Update Y axis ticks with new scale.
+    g.select(".y-axis").call(axisLeft(newYScale).ticks(6));
+    g.selectAll<SVGTextElement, number>(".y-axis text")
+      .style("font-size", "9px")
+      .attr("fill", COLORS.textColor);
+
+    // Update Y axis label position.
+    g.select(".y-axis-label").attr(
+      "y",
+      -newYScale.ticks(6).length * (PLOT_HEIGHT / 6) * 0.1 + 5,
+    );
+
+    // Update grid lines.
+    const newGridTicks = newYScale.ticks(6);
+    const gridLines = g
+      .selectAll<SVGLineElement, number>(".grid-line")
+      .data(newGridTicks);
+    gridLines.exit().remove();
+    gridLines
+      .attr("y1", (d: number) => newYScale(d))
+      .attr("y2", (d: number) => newYScale(d));
+    gridLines
+      .enter()
+      .append("line")
+      .attr("class", "grid-line")
+      .attr("x1", 0)
+      .attr("x2", PLOT_WIDTH)
+      .attr("y1", (d: number) => newYScale(d))
+      .attr("y2", (d: number) => newYScale(d))
+      .attr("stroke", COLORS.gridLine)
+      .attr("stroke-width", 0.5);
+  }
+
+  /** Helper to update the legend text and styling. */
+  function updateLegend(activeSeries: {
+    color: string;
+    label: string;
+    dashed: boolean;
+  }): void {
+    const legItem = legend.select("span");
+    legItem
+      .select("span:first-child")
+      .style("height", activeSeries.dashed ? "0" : "3px")
+      .style("background", activeSeries.dashed ? "transparent" : activeSeries.color)
+      .style(
+        "border-bottom",
+        activeSeries.dashed ? `${2}px solid ${activeSeries.color}` : "none",
+      );
+    legItem.select("span:last-child").text(activeSeries.label);
+  }
 }
