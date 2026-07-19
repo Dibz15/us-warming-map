@@ -45,6 +45,8 @@ export interface PopupChartOptions {
   /** Baseline and recent windows (required when method is "period_delta"). */
   periodDeltaWindows?: { baseline: YearWindow; recent: YearWindow };
   onClose?: () => void;
+  /** CSS selectors for elements that should NOT trigger the popup to close. */
+  ignoreSelectors?: string[];
 }
 
 const CHART_WIDTH = 320;
@@ -498,7 +500,11 @@ export async function showPopupChart(options: PopupChartOptions): Promise<PopupU
   // Close when clicking outside the popup (bubble up to body)
   const handleClickOutside = (event: MouseEvent) => {
     const target = event.target as HTMLElement;
-    if (!target.closest(".popup-chart")) {
+    // Check if the click is inside any of the ignored selectors.
+    const isIgnored = options.ignoreSelectors?.some((selector) =>
+      target.closest(selector),
+    );
+    if (!target.closest(".popup-chart") && !isIgnored) {
       overlay.remove();
       onClose?.();
       document.removeEventListener("click", handleClickOutside);

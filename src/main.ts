@@ -771,6 +771,11 @@ async function main(): Promise<void> {
         periodDeltaWindows: periodDeltaState
           ? { baseline: periodDeltaState.baseline, recent: periodDeltaState.recent }
           : undefined,
+        ignoreSelectors: [
+          ".slope-selector-panel",
+          "#settings-toggle-btn",
+          ".linear-legend",
+        ],
       }).then((updater) => {
         currentPopupUpdater = updater;
       });
