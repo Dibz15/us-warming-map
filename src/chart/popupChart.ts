@@ -526,11 +526,14 @@ export async function showPopupChart(options: PopupChartOptions): Promise<PopupU
   }, 100);
 
   /** Populate the slopes/div delta text elements. */
-  function populateSlopesText(periodWindows: PeriodDeltaWindows): void {
+  function populateSlopesText(
+    periodWindows: PeriodDeltaWindows,
+    isPeriod: boolean,
+  ): void {
     // Clear existing text nodes from slopesDiv (keep the element itself).
     slopesDiv.selectAll("*").remove();
 
-    if (options.method === "period_delta") {
+    if (isPeriod) {
       const units = METHOD_UNITS.period_delta;
       for (const { key, label } of PERIOD_DELTA_METRICS) {
         const delta = computePeriodDelta(
@@ -596,9 +599,10 @@ export async function showPopupChart(options: PopupChartOptions): Promise<PopupU
   }
 
   /** Update the window indicator rectangles on the SVG. */
-  function updateWindowIndicators(periodWindows: PeriodDeltaWindows): void {
-    const isPeriod = options.method === "period_delta";
-
+  function updateWindowIndicators(
+    periodWindows: PeriodDeltaWindows,
+    isPeriod: boolean,
+  ): void {
     if (isPeriod) {
       const bLeft = xScale(Math.max(periodWindows.baseline.start, xScale.domain()[0]));
       const bRight = xScale(Math.min(periodWindows.baseline.end, xScale.domain()[1]));
@@ -615,16 +619,6 @@ export async function showPopupChart(options: PopupChartOptions): Promise<PopupU
     }
   }
 
-  // Initial population of slopes and window indicators.
-  populateSlopesText({
-    baseline: options.periodDeltaWindows?.baseline ?? { start: xMin, end: xMin },
-    recent: options.periodDeltaWindows?.recent ?? { start: xMax, end: xMax },
-  });
-  updateWindowIndicators({
-    baseline: options.periodDeltaWindows?.baseline ?? { start: xMin, end: xMin },
-    recent: options.periodDeltaWindows?.recent ?? { start: xMax, end: xMax },
-  });
-
   // Capture initial options for closure references.
   const opts = {
     slopeType,
@@ -632,24 +626,54 @@ export async function showPopupChart(options: PopupChartOptions): Promise<PopupU
     periodDeltaWindows: options.periodDeltaWindows,
   };
 
+  // Initial population of slopes and window indicators.
+  const isPeriodInitial = opts.method === "period_delta";
+  populateSlopesText(
+    {
+      baseline: options.periodDeltaWindows?.baseline ?? { start: xMin, end: xMin },
+      recent: options.periodDeltaWindows?.recent ?? { start: xMax, end: xMax },
+    },
+    isPeriodInitial,
+  );
+  updateWindowIndicators(
+    {
+      baseline: options.periodDeltaWindows?.baseline ?? { start: xMin, end: xMin },
+      recent: options.periodDeltaWindows?.recent ?? { start: xMax, end: xMax },
+    },
+    isPeriodInitial,
+  );
+
   // Return the updater function.
   return {
-    update(options: PopupUpdateOptions): void {
+    update(updateOptions: PopupUpdateOptions): void {
+      // Track whether method changed in this update so we can sync opts.method.
+      const methodChanged = updateOptions.method !== undefined;
+      if (methodChanged) {
+        opts.method = updateOptions.method;
+      }
+
+      // Compute the current "is period" status from the most recent method.
+      const currentIsPeriod = opts.method === "period_delta";
+
       // Update slope/delta text if method or period windows changed.
-      if (options.method !== undefined || options.periodDeltaWindows !== undefined) {
-        const currentWindows = options.periodDeltaWindows ?? {
+      if (methodChanged || updateOptions.periodDeltaWindows !== undefined) {
+        const currentWindows = updateOptions.periodDeltaWindows ?? {
           baseline: opts.periodDeltaWindows?.baseline ?? { start: xMin, end: xMin },
           recent: opts.periodDeltaWindows?.recent ?? { start: xMax, end: xMax },
         };
-        populateSlopesText(currentWindows);
-        updateWindowIndicators(currentWindows);
+        populateSlopesText(currentWindows, currentIsPeriod);
+        updateWindowIndicators(currentWindows, currentIsPeriod);
       }
 
       // Update the series line if slope type changed.
-      if (options.slopeType !== undefined && options.slopeType !== opts.slopeType) {
-        const newActiveSeries = getActiveSeriesForType(options.slopeType);
+      if (
+        updateOptions.slopeType !== undefined &&
+        updateOptions.slopeType !== opts.slopeType
+      ) {
+        const newActiveSeries = getActiveSeriesForType(updateOptions.slopeType);
         updateSeriesLine(newActiveSeries);
         updateLegend(newActiveSeries);
+        opts.slopeType = updateOptions.slopeType;
       }
     },
   };
