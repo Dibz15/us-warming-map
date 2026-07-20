@@ -28,10 +28,20 @@ const METHOD_UNITS: Record<MethodType, string> = {
   period_delta: "\u00b0F",
 };
 
+/** Configuration options for updating the popup chart. */
+export interface PopupUpdateOptions {
+  /** The active metric/slope type (e.g., 'tmax', 'tmean', 'tmin'). */
+  slopeType?: SlopeType;
+  /** When "period_delta", uses windowed mean deltas instead of OLS slopes. */
+  method?: MethodType;
+  /** Baseline and recent windows for period delta mode. */
+  periodDeltaWindows?: PeriodDeltaWindows;
+}
+
 /** Updater returned by showPopupChart for dynamic state updates. */
 export interface PopupUpdater {
-  /** Update the popup chart with new period delta windows and metric. */
-  update(periodDeltaWindows: PeriodDeltaWindows): void;
+  /** Update the popup chart with new configuration options. */
+  update(options: PopupUpdateOptions): void;
 }
 
 /** Options for showPopupChart. */
@@ -45,6 +55,8 @@ export interface PopupChartOptions {
   /** Baseline and recent windows (required when method is "period_delta"). */
   periodDeltaWindows?: { baseline: YearWindow; recent: YearWindow };
   onClose?: () => void;
+  /** CSS selectors for elements that should NOT trigger the popup to close. */
+  ignoreSelectors?: string[];
 }
 
 const CHART_WIDTH = 320;
@@ -402,12 +414,13 @@ export async function showPopupChart(options: PopupChartOptions): Promise<PopupU
     .style("stroke", COLORS.gridLine)
     .style("fill", "none");
 
-  // Axis labels — adjust y position to avoid overlap
+  // Axis labels — fixed position for consistent °F label placement
+  // With rotate(-90), 'y' controls horizontal offset from axis origin (positive = left/outside chart)
   g.append("text")
     .attr("class", "y-axis-label")
     .attr("transform", "rotate(-90)")
     .attr("x", -PLOT_HEIGHT / 2)
-    .attr("y", -35)
+    .attr("y", -30)
     .attr("text-anchor", "middle")
     .style("font-size", "10px")
     .style("fill", COLORS.textColor)
@@ -498,7 +511,11 @@ export async function showPopupChart(options: PopupChartOptions): Promise<PopupU
   // Close when clicking outside the popup (bubble up to body)
   const handleClickOutside = (event: MouseEvent) => {
     const target = event.target as HTMLElement;
-    if (!target.closest(".popup-chart")) {
+    // Check if the click is inside any of the ignored selectors.
+    const isIgnored = options.ignoreSelectors?.some((selector) =>
+      target.closest(selector),
+    );
+    if (!target.closest(".popup-chart") && !isIgnored) {
       overlay.remove();
       onClose?.();
       document.removeEventListener("click", handleClickOutside);
@@ -509,80 +526,75 @@ export async function showPopupChart(options: PopupChartOptions): Promise<PopupU
     document.addEventListener("click", handleClickOutside);
   }, 100);
 
-  /** Populate the slopes/div delta text elements. */
-  function populateSlopesText(periodWindows: PeriodDeltaWindows): void {
-    // Clear existing text nodes from slopesDiv (keep the element itself).
+  /** Label mappings for each slope type in both modes. */
+  const SLOPE_TYPE_LABELS: Record<SlopeType, string> = {
+    tmax: "Max",
+    tmin: "Min",
+    tmean: "Avg",
+    true_dtr: "DTR",
+    seasonal_amplitude: "Seasonal change",
+  };
+
+  /** Mapping from slope types to county data field accessors for trend mode. */
+  const SLOPE_GETTERS: Record<
+    SlopeType,
+    (county: NonNullable<CountyDataset["counties"]>[number]) => number
+  > = {
+    tmax: (c) => c.slopeTMax,
+    tmin: (c) => c.slopeTMin,
+    tmean: (c) => c.slopeTMean,
+    true_dtr: (c) => c.slopeTrueDTR,
+    seasonal_amplitude: (c) => c.slopeSeasonalAmplitude,
+  };
+
+  /** Populate the slopes/div delta text elements for only the active slopeType. */
+  function populateSlopesText(
+    periodWindows: PeriodDeltaWindows,
+    isPeriod: boolean,
+    activeSlopeType: SlopeType,
+  ): void {
+    // Clear existing children from slopesDiv (keep the element itself).
     slopesDiv.selectAll("*").remove();
 
-    if (options.method === "period_delta") {
+    if (isPeriod) {
       const units = METHOD_UNITS.period_delta;
-      for (const { key, label } of PERIOD_DELTA_METRICS) {
-        const delta = computePeriodDelta(
-          county,
-          key,
-          periodWindows.baseline,
-          periodWindows.recent,
-        );
-        const styled = formatValue(delta, COLORS.tmax, COLORS.tmin);
-        slopesDiv
-          .append("div")
-          .style("font-size", "11px")
-          .style("font-weight", "500")
-          .style("color", styled.color)
-          .text(`${label}: ${styled.label} ${units}`);
-      }
-    } else {
-      // Trend mode: show OLS slopes from the precomputed dataset.
-      const tmaxSlope = formatSlope(county.slopeTMax, COLORS.tmax, COLORS.tmin);
-      slopesDiv
-        .append("div")
-        .style("font-size", "11px")
-        .style("font-weight", "500")
-        .style("color", tmaxSlope.color)
-        .text(`Max: ${tmaxSlope.label} °F/decade`);
+      const metricKey = activeSlopeType as MetricType;
+      const labelEntry = PERIOD_DELTA_METRICS.find((m) => m.key === metricKey);
+      const label = labelEntry ? labelEntry.label : SLOPE_TYPE_LABELS[activeSlopeType];
 
-      const tmeanSlope = formatSlope(county.slopeTMean, COLORS.tmax, COLORS.tmin);
-      slopesDiv
-        .append("div")
-        .style("font-size", "11px")
-        .style("font-weight", "500")
-        .style("color", tmeanSlope.color)
-        .text(`Avg: ${tmeanSlope.label} °F/decade`);
-
-      const tminSlope = formatSlope(county.slopeTMin, COLORS.tmax, COLORS.tmin);
-      slopesDiv
-        .append("div")
-        .style("font-size", "11px")
-        .style("font-weight", "500")
-        .style("color", tminSlope.color)
-        .text(`Min: ${tminSlope.label} °F/decade`);
-
-      const trueDtrSlope = formatSlope(county.slopeTrueDTR, COLORS.tmax, COLORS.tmin);
-      slopesDiv
-        .append("div")
-        .style("font-size", "11px")
-        .style("font-weight", "500")
-        .style("color", trueDtrSlope.color)
-        .text(`DTR: ${trueDtrSlope.label} °F/decade`);
-
-      const seasonAmpSlope = formatSlope(
-        county.slopeSeasonalAmplitude,
-        COLORS.tmax,
-        COLORS.tmin,
+      const delta = computePeriodDelta(
+        county,
+        metricKey,
+        periodWindows.baseline,
+        periodWindows.recent,
       );
+      const styled = formatValue(delta, COLORS.tmax, COLORS.tmin);
       slopesDiv
         .append("div")
         .style("font-size", "11px")
         .style("font-weight", "500")
-        .style("color", seasonAmpSlope.color)
-        .text(`Seasonal change: ${seasonAmpSlope.label} °F/decade`);
+        .style("color", styled.color)
+        .text(`${label}: ${styled.label} ${units}`);
+    } else {
+      // Trend mode: show only the OLS slope for the active series.
+      const getSlope = SLOPE_GETTERS[activeSlopeType];
+      const slope = getSlope(county);
+      const label = SLOPE_TYPE_LABELS[activeSlopeType];
+      const styled = formatSlope(slope, COLORS.tmax, COLORS.tmin);
+      slopesDiv
+        .append("div")
+        .style("font-size", "11px")
+        .style("font-weight", "500")
+        .style("color", styled.color)
+        .text(`${label}: ${styled.label} °F/decade`);
     }
   }
 
   /** Update the window indicator rectangles on the SVG. */
-  function updateWindowIndicators(periodWindows: PeriodDeltaWindows): void {
-    const isPeriod = options.method === "period_delta";
-
+  function updateWindowIndicators(
+    periodWindows: PeriodDeltaWindows,
+    isPeriod: boolean,
+  ): void {
     if (isPeriod) {
       const bLeft = xScale(Math.max(periodWindows.baseline.start, xScale.domain()[0]));
       const bRight = xScale(Math.min(periodWindows.baseline.end, xScale.domain()[1]));
@@ -599,23 +611,215 @@ export async function showPopupChart(options: PopupChartOptions): Promise<PopupU
     }
   }
 
+  // Capture initial options for closure references.
+  const opts = {
+    slopeType,
+    method: options.method,
+    periodDeltaWindows: options.periodDeltaWindows,
+  };
+
   // Initial population of slopes and window indicators.
-  populateSlopesText({
-    baseline: options.periodDeltaWindows?.baseline ?? { start: xMin, end: xMin },
-    recent: options.periodDeltaWindows?.recent ?? { start: xMax, end: xMax },
-  });
-  updateWindowIndicators({
-    baseline: options.periodDeltaWindows?.baseline ?? { start: xMin, end: xMin },
-    recent: options.periodDeltaWindows?.recent ?? { start: xMax, end: xMax },
-  });
+  const isPeriodInitial = opts.method === "period_delta";
+  populateSlopesText(
+    {
+      baseline: options.periodDeltaWindows?.baseline ?? { start: xMin, end: xMin },
+      recent: options.periodDeltaWindows?.recent ?? { start: xMax, end: xMax },
+    },
+    isPeriodInitial,
+    slopeType,
+  );
+  updateWindowIndicators(
+    {
+      baseline: options.periodDeltaWindows?.baseline ?? { start: xMin, end: xMin },
+      recent: options.periodDeltaWindows?.recent ?? { start: xMax, end: xMax },
+    },
+    isPeriodInitial,
+  );
 
   // Return the updater function.
   return {
-    update(periodDeltaWindows: PeriodDeltaWindows): void {
-      // Recalculate and update slope/delta text.
-      populateSlopesText(periodDeltaWindows);
-      // Update the window indicator rectangles.
-      updateWindowIndicators(periodDeltaWindows);
+    update(updateOptions: PopupUpdateOptions): void {
+      // Track whether method changed in this update so we can sync opts.method.
+      const methodChanged = updateOptions.method !== undefined;
+      if (methodChanged) {
+        opts.method = updateOptions.method;
+      }
+
+      // Compute the current "is period" status from the most recent method.
+      const currentIsPeriod = opts.method === "period_delta";
+
+      // Update slope/delta text if method or period windows changed.
+      if (methodChanged || updateOptions.periodDeltaWindows !== undefined) {
+        const currentWindows = updateOptions.periodDeltaWindows ?? {
+          baseline: opts.periodDeltaWindows?.baseline ?? { start: xMin, end: xMin },
+          recent: opts.periodDeltaWindows?.recent ?? { start: xMax, end: xMax },
+        };
+        populateSlopesText(currentWindows, currentIsPeriod, opts.slopeType);
+        updateWindowIndicators(currentWindows, currentIsPeriod);
+      }
+
+      // Update the series line if slope type changed.
+      if (
+        updateOptions.slopeType !== undefined &&
+        updateOptions.slopeType !== opts.slopeType
+      ) {
+        const newActiveSeries = getActiveSeriesForType(updateOptions.slopeType);
+        updateSeriesLine(newActiveSeries);
+        updateLegend(newActiveSeries);
+
+        // Also update the slope/delta text when the active series changes.
+        const currentWindows = {
+          baseline: opts.periodDeltaWindows?.baseline ?? { start: xMin, end: xMin },
+          recent: opts.periodDeltaWindows?.recent ?? { start: xMax, end: xMax },
+        };
+        populateSlopesText(
+          currentWindows,
+          opts.method === "period_delta",
+          updateOptions.slopeType,
+        );
+
+        opts.slopeType = updateOptions.slopeType;
+      }
     },
   };
+
+  /** Helper to compute series for a given slope type. */
+  function getActiveSeriesForType(sType: SlopeType): {
+    values: number[];
+    color: string;
+    label: string;
+    dashed: boolean;
+  } {
+    switch (sType) {
+      case "tmax":
+        return {
+          values: county.series.map((d) => d.tmax ?? NaN),
+          color: COLORS.tmax,
+          label: SERIES_LABELS.tmax,
+          dashed: false,
+        };
+      case "tmin":
+        return {
+          values: county.series.map((d) => d.tmin ?? NaN),
+          color: COLORS.tmin,
+          label: SERIES_LABELS.tmin,
+          dashed: false,
+        };
+      case "tmean": {
+        const meanVals = county.series.map((d) => {
+          if (isNaN(d.tmax) || isNaN(d.tmin)) return NaN;
+          return (d.tmax + d.tmin) / 2;
+        });
+        return {
+          values: meanVals,
+          color: COLORS.tmean,
+          label: SERIES_LABELS.tmean,
+          dashed: false,
+        };
+      }
+      case "true_dtr":
+        return {
+          values: county.series.map((d) => d.true_dtr ?? NaN),
+          color: COLORS.trueDtr,
+          label: SERIES_LABELS.true_dtr,
+          dashed: true,
+        };
+      case "seasonal_amplitude": {
+        const ampVals = county.series.map((d) => {
+          if (isNaN(d.tmax) || isNaN(d.tmin)) return NaN;
+          return d.tmax - d.tmin;
+        });
+        return {
+          values: ampVals,
+          color: COLORS.seasonAmp,
+          label: SERIES_LABELS.seasonal_amplitude,
+          dashed: false,
+        };
+      }
+    }
+  }
+
+  /** Helper to rebuild Y scale from a series' valid values. */
+  function computeYScale(
+    values: number[],
+  ): import("d3-scale").ScaleLinear<number, number> {
+    const valid = values.filter((v) => !isNaN(v));
+    if (valid.length === 0) {
+      return scaleLinear().domain([0, 1]).range([PLOT_HEIGHT, 0]);
+    }
+    const yMin = Math.min(...valid);
+    const yMax = Math.max(...valid);
+    const yPad = (yMax - yMin) * 0.15 || 1;
+    return scaleLinear()
+      .domain([yMin - yPad, yMax + yPad])
+      .range([PLOT_HEIGHT, 0]);
+  }
+
+  /** Helper to update the series path and styling. */
+  function updateSeriesLine(activeSeries: {
+    values: number[];
+    color: string;
+    dashed: boolean;
+  }): void {
+    const newYScale = computeYScale(activeSeries.values);
+
+    // Rebuild the line path using the new scale.
+    let path = "";
+    for (let i = 0; i < data.length; i++) {
+      const cx = xScale(data[i].year);
+      const cy = newYScale(activeSeries.values[i]);
+      if (isNaN(cy)) continue;
+      path += (path === "" ? "M" : "L") + `${cx},${cy}`;
+    }
+
+    // Update the series line.
+    g.select(".active-series-line")
+      .attr("d", path)
+      .attr("stroke", activeSeries.color)
+      .attr("stroke-dasharray", activeSeries.dashed ? "4,2" : null);
+
+    // Update Y axis ticks with new scale.
+    g.select(".y-axis").call(axisLeft(newYScale).ticks(6));
+    g.selectAll<SVGTextElement, number>(".y-axis text")
+      .style("font-size", "9px")
+      .attr("fill", COLORS.textColor);
+
+    // Update grid lines.
+    const newGridTicks = newYScale.ticks(6);
+    const gridLines = g
+      .selectAll<SVGLineElement, number>(".grid-line")
+      .data(newGridTicks);
+    gridLines.exit().remove();
+    gridLines
+      .attr("y1", (d: number) => newYScale(d))
+      .attr("y2", (d: number) => newYScale(d));
+    gridLines
+      .enter()
+      .append("line")
+      .attr("class", "grid-line")
+      .attr("x1", 0)
+      .attr("x2", PLOT_WIDTH)
+      .attr("y1", (d: number) => newYScale(d))
+      .attr("y2", (d: number) => newYScale(d))
+      .attr("stroke", COLORS.gridLine)
+      .attr("stroke-width", 0.5);
+  }
+
+  /** Helper to update the legend text and styling. */
+  function updateLegend(activeSeries: {
+    color: string;
+    label: string;
+    dashed: boolean;
+  }): void {
+    const legItem = legend.select("span");
+    legItem
+      .select("span:first-child")
+      .style("height", activeSeries.dashed ? "0" : "3px")
+      .style("background", activeSeries.dashed ? "transparent" : activeSeries.color)
+      .style(
+        "border-bottom",
+        activeSeries.dashed ? `${2}px solid ${activeSeries.color}` : "none",
+      );
+    legItem.select("span:last-child").text(activeSeries.label);
+  }
 }

@@ -41,7 +41,7 @@ const METHOD_UNITS: Record<MethodType, string> = {
 };
 
 /** Minimum gap between baseline and recent windows (years). */
-const MIN_WINDOW_GAP = 20;
+const MIN_WINDOW_GAP = 10;
 
 /** Default number of years in each window when period delta is first activated. */
 const DEFAULT_WINDOW_YEARS = 15;
@@ -223,11 +223,39 @@ async function main(): Promise<void> {
         // Rebuild the panel to reflect new method state (DTR disabled/visible year picker).
         rebuildPanel();
         applyMetricAndMethod();
+
+        // Update the active popup chart with the new method/windows.
+        if (currentPopupUpdater) {
+          currentPopupUpdater.update({
+            method: currentMethod,
+            periodDeltaWindows: periodDeltaState
+              ? { baseline: periodDeltaState.baseline, recent: periodDeltaState.recent }
+              : undefined,
+          });
+        }
       }
 
       if (target.name === "metric-type" && target.value) {
         currentMetric = target.value as MetricType;
         applyMetricAndMethod();
+
+        // Update the active popup chart with the new metric/slope type.
+        if (currentPopupUpdater) {
+          const metricToSlope: Record<MetricType, SlopeType> = {
+            tmax: "tmax",
+            tmean: "tmean",
+            tmin: "tmin",
+            true_dtr: "true_dtr",
+            seasonal_amplitude: "seasonal_amplitude",
+          };
+          currentPopupUpdater.update({
+            slopeType: metricToSlope[currentMetric],
+            method: currentMethod,
+            periodDeltaWindows: periodDeltaState
+              ? { baseline: periodDeltaState.baseline, recent: periodDeltaState.recent }
+              : undefined,
+          });
+        }
       }
     };
 
@@ -380,8 +408,11 @@ async function main(): Promise<void> {
     // Update the active popup chart's window indicators and delta text.
     if (currentPopupUpdater && periodDeltaState) {
       currentPopupUpdater.update({
-        baseline: periodDeltaState.baseline,
-        recent: periodDeltaState.recent,
+        method: currentMethod,
+        periodDeltaWindows: {
+          baseline: periodDeltaState.baseline,
+          recent: periodDeltaState.recent,
+        },
       });
     }
   }
@@ -771,6 +802,11 @@ async function main(): Promise<void> {
         periodDeltaWindows: periodDeltaState
           ? { baseline: periodDeltaState.baseline, recent: periodDeltaState.recent }
           : undefined,
+        ignoreSelectors: [
+          ".slope-selector-panel",
+          "#settings-toggle-btn",
+          ".linear-legend",
+        ],
       }).then((updater) => {
         currentPopupUpdater = updater;
       });
