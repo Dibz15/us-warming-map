@@ -4,6 +4,10 @@ An interactive map showing temperature trends across US counties from 1895
 to present. Each county is colored by how its temperature is changing over
 time, and clicking a county reveals its full annual temperature history.
 
+![screenshot of desktop view](./media/screenshot.png)
+
+Live page accessible here: [https://dibz15.github.io/us-warming-map/](https://dibz15.github.io/us-warming-map/)
+
 ## Motivation
 
 The US keeps breaking temperature records year over year. In pursuit of trying to understand
@@ -17,6 +21,12 @@ see and understand how our local climates are changing, and the surprising ways 
 For those technically minded, see [`docs/methodology.md`](docs/methodology.md) for the technical detail
 on what the underlying data actually represents, how each metric and
 color mode is calculated, and where the limitations are.
+
+## Usage
+
+- Pan/zoom: on desktop, click & hold to pan and scroll to zoom. On mobile, pinch to zoom or use one finger to pan.
+- Per-county trends. Click on a single county to view its historic trends and change over time.
+- Change calculation method or the temperature scaling using the "Scales" menu in the upper-right corner.
 
 ## Features
 
@@ -45,11 +55,6 @@ measures (it's not what you might assume) and
 [`data-pipeline/README.md`](data-pipeline/README.md) for the mechanics of
 fetching and processing it, including a couple of real gotchas in NOAA's
 own file format that are worth knowing about before touching the pipeline.
-
-## Live demo
-
-A deployed version of this map is available on
-[GitHub Pages](https://dibz15.github.io/us-warming-map/).
 
 ## Local development
 
