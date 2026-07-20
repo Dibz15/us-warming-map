@@ -59,10 +59,12 @@ export interface PopupChartOptions {
   ignoreSelectors?: string[];
 }
 
+/** Minimum breakpoint for mobile layout (matches src/main.ts). */
+const MOBILE_BREAKPOINT = 768;
+
 const CHART_WIDTH = 320;
 const CHART_HEIGHT = 220;
 const MARGIN = { top: 20, right: 15, bottom: 30, left: 40 };
-const PLOT_WIDTH = CHART_WIDTH - MARGIN.left - MARGIN.right;
 const PLOT_HEIGHT = CHART_HEIGHT - MARGIN.top - MARGIN.bottom;
 
 const COLORS = {
@@ -238,20 +240,37 @@ export async function showPopupChart(options: PopupChartOptions): Promise<PopupU
 
   const activeSeries = getActiveSeries();
 
+  // Determine if we're on mobile for responsive sizing.
+  const isMobile = window.innerWidth < MOBILE_BREAKPOINT;
+
+  // Calculate the effective width based on layout mode.
+  let effectiveWidth: number;
+  if (isMobile) {
+    // Edge-to-edge on mobile with small horizontal margins.
+    effectiveWidth = Math.min(window.innerWidth - 16, 600);
+  } else {
+    effectiveWidth = CHART_WIDTH;
+  }
+
+  // Calculate the plot width dynamically to ensure the chart stretches properly
+  // across different screen sizes on mobile devices.
+  const localPlotWidth = effectiveWidth - MARGIN.left - MARGIN.right;
+
   // Remove any existing popup
   select(container).selectAll(".popup-chart").remove();
 
-  // Create overlay container
+  // Create overlay container with responsive styles.
   const overlay = select(container)
     .append("div")
     .attr("class", "popup-chart")
     .style("position", "absolute")
-    .style("left", `${position.x}px`)
+    .style("left", isMobile ? "0px" : `${position.x}px`)
     .style("top", `${position.y}px`)
+    .style("width", isMobile ? `${effectiveWidth}px` : "auto")
     .style("background", COLORS.background)
-    .style("border-radius", "6px")
-    .style("box-shadow", "0 4px 16px rgba(0,0,0,0.2)")
-    .style("padding", "12px")
+    .style("border-radius", isMobile ? "0px" : "6px")
+    .style("box-shadow", isMobile ? "none" : "0 4px 16px rgba(0,0,0,0.2)")
+    .style("padding", isMobile ? "8px" : "12px")
     .style("z-index", "1000")
     .style("font-family", "system-ui, -apple-system, sans-serif");
 
@@ -312,14 +331,14 @@ export async function showPopupChart(options: PopupChartOptions): Promise<PopupU
   const chartDiv = overlay
     .append("div")
     .attr("class", "popup-chart-svg-container")
-    .style("width", `${CHART_WIDTH}px`)
+    .style("width", `${effectiveWidth}px`)
     .style("height", `${CHART_HEIGHT - MARGIN.bottom}px`)
     .style("margin-left", "auto")
     .style("margin-right", "auto");
 
   const svg = chartDiv
     .append("svg")
-    .attr("width", CHART_WIDTH)
+    .attr("width", effectiveWidth)
     .attr("height", PLOT_HEIGHT + MARGIN.top + MARGIN.bottom)
     .style("display", "block");
 
@@ -345,7 +364,7 @@ export async function showPopupChart(options: PopupChartOptions): Promise<PopupU
   const xMax = Math.max(...years);
   const xScale = scaleLinear()
     .domain([xMin - 1, xMax + 1])
-    .range([0, PLOT_WIDTH]);
+    .range([0, localPlotWidth]);
 
   // Y scale — use only the active series data for proper scaling
   const yMin = Math.min(...validValues);
@@ -389,7 +408,7 @@ export async function showPopupChart(options: PopupChartOptions): Promise<PopupU
     .append("line")
     .attr("class", "grid-line")
     .attr("x1", 0)
-    .attr("x2", PLOT_WIDTH)
+    .attr("x2", localPlotWidth)
     .attr("y1", (d: number) => yScale(d))
     .attr("y2", (d: number) => yScale(d))
     .attr("stroke", COLORS.gridLine)
@@ -451,7 +470,7 @@ export async function showPopupChart(options: PopupChartOptions): Promise<PopupU
   // X axis label
   g.append("text")
     .attr("class", "x-axis-label")
-    .attr("x", PLOT_WIDTH / 2)
+    .attr("x", localPlotWidth / 2)
     .attr("y", PLOT_HEIGHT + 25)
     .attr("text-anchor", "middle")
     .style("font-size", "10px")
@@ -798,7 +817,7 @@ export async function showPopupChart(options: PopupChartOptions): Promise<PopupU
       .append("line")
       .attr("class", "grid-line")
       .attr("x1", 0)
-      .attr("x2", PLOT_WIDTH)
+      .attr("x2", localPlotWidth)
       .attr("y1", (d: number) => newYScale(d))
       .attr("y2", (d: number) => newYScale(d))
       .attr("stroke", COLORS.gridLine)
