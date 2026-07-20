@@ -41,7 +41,7 @@ const METHOD_UNITS: Record<MethodType, string> = {
 };
 
 /** Minimum gap between baseline and recent windows (years). */
-const MIN_WINDOW_GAP = 20;
+const MIN_WINDOW_GAP = 10;
 
 /** Default number of years in each window when period delta is first activated. */
 const DEFAULT_WINDOW_YEARS = 15;
