@@ -759,9 +759,24 @@ async function main(): Promise<void> {
 
   // --- Toggle panel visibility. ---
   let panelVisible = false;
-  toggleBtn.addEventListener("click", () => {
+  toggleBtn.addEventListener("click", (evt) => {
+    evt.stopPropagation();
     panelVisible = !panelVisible;
     panel.style.display = panelVisible ? "block" : "none";
+  });
+
+  // Auto-hide the panel on mobile when clicking outside of it.
+  document.addEventListener("click", (evt: MouseEvent) => {
+    if (window.innerWidth >= MOBILE_BREAKPOINT || !panelVisible) return;
+
+    const target = evt.target as Node;
+    const isInsidePanel = panel.contains(target);
+    const isInsideToggleBtn = toggleBtn.contains(target);
+
+    if (!isInsidePanel && !isInsideToggleBtn) {
+      panelVisible = false;
+      panel.style.display = "none";
+    }
   });
 
   // Initial panel build.

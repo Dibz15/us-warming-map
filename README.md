@@ -4,7 +4,7 @@ An interactive map showing temperature trends across US counties from 1895
 to present. Each county is colored by how its temperature is changing over
 time, and clicking a county reveals its full annual temperature history.
 
-![screenshot of desktop view](./media/screenshot.png)
+![screenshot of desktop view](./media/example.gif)
 
 Live page accessible here: [https://dibz15.github.io/us-warming-map/](https://dibz15.github.io/us-warming-map/)
 
