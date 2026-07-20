@@ -414,12 +414,13 @@ export async function showPopupChart(options: PopupChartOptions): Promise<PopupU
     .style("stroke", COLORS.gridLine)
     .style("fill", "none");
 
-  // Axis labels — adjust y position to avoid overlap
+  // Axis labels — fixed position for consistent °F label placement
+  // With rotate(-90), 'y' controls horizontal offset from axis origin (positive = left/outside chart)
   g.append("text")
     .attr("class", "y-axis-label")
     .attr("transform", "rotate(-90)")
     .attr("x", -PLOT_HEIGHT / 2)
-    .attr("y", -35)
+    .attr("y", -30)
     .attr("text-anchor", "middle")
     .style("font-size", "10px")
     .style("fill", COLORS.textColor)
@@ -778,12 +779,6 @@ export async function showPopupChart(options: PopupChartOptions): Promise<PopupU
     g.selectAll<SVGTextElement, number>(".y-axis text")
       .style("font-size", "9px")
       .attr("fill", COLORS.textColor);
-
-    // Update Y axis label position.
-    g.select(".y-axis-label").attr(
-      "y",
-      -newYScale.ticks(6).length * (PLOT_HEIGHT / 6) * 0.1 + 5,
-    );
 
     // Update grid lines.
     const newGridTicks = newYScale.ticks(6);
