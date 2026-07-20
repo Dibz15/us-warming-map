@@ -74,16 +74,21 @@ async function main(): Promise<void> {
   // Track the currently selected county so we can clear the popup.
   let selectedCounty: NonNullable<CountyDataset["counties"]>[number] | null = null;
 
-  /** Position the popup chart to center it on the map viewport. */
-  function computePosition(svgEl: SVGSVGElement, w: number, h: number): PopupPosition {
+  /** Minimum breakpoint for mobile layout. */
+  const MOBILE_BREAKPOINT = 768;
+
+  /** Position the popup chart: top-left on desktop, centered edge-to-edge on mobile. */
+  function computePosition(svgEl: SVGSVGElement, _w: number, h: number): PopupPosition {
     const rect = svgEl.getBoundingClientRect();
-    let x = rect.width / 2 - w / 2;
-    let y = rect.height / 2 - h / 2;
-    if (x < 8) x = 8;
-    if (x + w > rect.width - 8) x = rect.width - w - 8;
-    if (y < 8) y = 8;
-    if (y + h > rect.height - 8) y = rect.height - h - 8;
-    return { x, y };
+    const isMobile = window.innerWidth < MOBILE_BREAKPOINT;
+
+    if (isMobile) {
+      // Mobile: edge-to-edge horizontally, centered vertically.
+      return { x: 0, y: Math.max(8, (rect.height - h) / 2) };
+    }
+
+    // Desktop: top-left with a small margin.
+    return { x: 12, y: 12 };
   }
 
   // --- State tracking ---
